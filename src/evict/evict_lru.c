@@ -435,10 +435,10 @@ __evict_server(WT_SESSION_IMPL *session, bool *did_work)
         return (0);
 #endif
     /*
-     * If we're stuck for 5 minutes in diagnostic mode, or the verbose evict_stuck flag is
+     * If we're stuck for 3 minutes in diagnostic mode, or the verbose evict_stuck flag is
      * configured, log the cache and transaction state.
      *
-     * If we're stuck for 5 minutes in diagnostic mode, give up.
+     * If we're stuck for 3 minutes in diagnostic mode, give up.
      *
      * We don't do this check for in-memory workloads because application threads are not blocked by
      * the cache being full. If the cache becomes full of clean pages, we can be servicing reads
@@ -448,7 +448,7 @@ __evict_server(WT_SESSION_IMPL *session, bool *did_work)
         return (0);
 
     __wt_epoch(session, &now);
-    if (WT_TIMEDIFF_SEC(now, cache->stuck_time) > WT_MINUTE * 5) {
+    if (WT_TIMEDIFF_SEC(now, cache->stuck_time) > WT_MINUTE * 3) {
 #if defined(HAVE_DIAGNOSTIC)
         __wt_err(session, ETIMEDOUT, "Cache stuck for too long, giving up");
         WT_RET(__wt_verbose_dump_txn(session));

@@ -123,7 +123,7 @@ checkpoint(void *arg)
         if (backup_locked)
             lock_writeunlock(session, &g.backup_lock);
 
-        secs = mmrand(NULL, 5, 40);
+        secs = mmrand(NULL, 3, 6);
     }
 
     testutil_check(session->close(session, NULL));

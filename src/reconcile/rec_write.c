@@ -1405,7 +1405,7 @@ __wt_rec_split_finish(WT_SESSION_IMPL *session, WT_RECONCILE *r)
     /* Potentially reconsider a previous chunk. */
     if (r->prev_ptr != NULL)
         WT_RET(__rec_split_finish_process_prev(session, r));
-
+    __wt_sleep(0, 10000);
     /* Write the remaining data/last page. */
     return (__rec_split_write(session, r, r->cur_ptr, NULL, true));
 }
