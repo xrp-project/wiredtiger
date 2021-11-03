@@ -1706,7 +1706,7 @@ __evict_walk_tree(WT_SESSION_IMPL *session, WT_EVICT_QUEUE *queue, u_int max_ent
     WT_PAGE *last_parent, *page;
     WT_REF *ref;
     uint64_t internal_pages_already_queued, internal_pages_queued, internal_pages_seen,
-      update_pages_skipped, update_pages_wanted;
+      update_pages_skipped, update_pages_wanted, pages_checkpoint_skipped;
     uint64_t min_pages, pages_already_queued, pages_seen, pages_queued, refs_walked;
     uint32_t read_flags, remaining_slots, target_pages, walk_flags;
     int restarts;
@@ -1933,8 +1933,12 @@ __evict_walk_tree(WT_SESSION_IMPL *session, WT_EVICT_QUEUE *queue, u_int max_ent
         }
 
         /* Don't queue dirty pages in trees during checkpoints. */
-        if (modified && WT_BTREE_SYNCING(btree))
+        if (modified && WT_BTREE_SYNCING(btree)) {
+            if (F_ISSET(cache, WT_CACHE_EVICT_UPDATES)) {
+                pages_checkpoint_skipped++;
+            }
             continue;
+        }
 
         /*
          * It's possible (but unlikely) to visit a page without a read generation, if we race with
@@ -1986,7 +1990,7 @@ __evict_walk_tree(WT_SESSION_IMPL *session, WT_EVICT_QUEUE *queue, u_int max_ent
           (F_ISSET(cache, WT_CACHE_EVICT_DIRTY) && modified) ||
           (F_ISSET(cache, WT_CACHE_EVICT_UPDATES) && page->modify != NULL);
 
-        if (!want_page && (F_ISSET(cache, WT_CACHE_EVICT_UPDATES))) {
+        if (F_ISSET(cache, WT_CACHE_EVICT_UPDATES)) {
             if (page->modify != NULL)
                 update_pages_wanted++;
             else
@@ -2095,6 +2099,7 @@ fast:
     WT_STAT_CONN_INCRV(session, cache_eviction_update_skipped, update_pages_skipped);
     WT_STAT_CONN_INCRV(session, cache_eviction_update_wanted, update_pages_wanted);
     WT_STAT_CONN_INCRV(session, cache_eviction_walk, refs_walked);
+    WT_STAT_CONN_INCRV(session, cache_checkpoint_skipped, pages_checkpoint_skipped);
     WT_STAT_CONN_DATA_INCRV(session, cache_eviction_pages_seen, pages_seen);
     WT_STAT_CONN_INCRV(session, cache_eviction_pages_already_queued, pages_already_queued);
     WT_STAT_CONN_INCRV(session, cache_eviction_internal_pages_seen, internal_pages_seen);
