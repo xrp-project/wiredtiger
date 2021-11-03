@@ -1986,7 +1986,7 @@ __evict_walk_tree(WT_SESSION_IMPL *session, WT_EVICT_QUEUE *queue, u_int max_ent
           (F_ISSET(cache, WT_CACHE_EVICT_DIRTY) && modified) ||
           (F_ISSET(cache, WT_CACHE_EVICT_UPDATES) && page->modify != NULL);
 
-        if (!want_page && (F_ISSET(cache, WT_CACHE_EVICT_UPDATES) && page->modify == NULL)) {
+        if (!want_page && (F_ISSET(cache, WT_CACHE_EVICT_UPDATES))) {
             if (page->modify != NULL)
                 update_pages_wanted++;
             else
