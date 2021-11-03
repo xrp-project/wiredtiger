@@ -513,6 +513,8 @@ struct __wt_connection_stats {
     int64_t cache_bytes_dirty;
     int64_t cache_pages_dirty;
     int64_t cache_eviction_clean;
+    int64_t cache_eviction_update_skipped;
+    int64_t cache_eviction_update_wanted;
     int64_t fsync_all_fh_total;
     int64_t fsync_all_fh;
     int64_t fsync_all_time;
@@ -963,6 +965,8 @@ struct __wt_dsrc_stats {
     int64_t cache_hs_insert_reverse_modify;
     int64_t cache_bytes_dirty;
     int64_t cache_eviction_clean;
+    int64_t cache_eviction_update_skipped;
+    int64_t cache_eviction_update_wanted;
     int64_t cache_state_gen_avg_gap;
     int64_t cache_state_avg_written_size;
     int64_t cache_state_avg_visited_age;
