@@ -1707,7 +1707,7 @@ __evict_walk_tree(WT_SESSION_IMPL *session, WT_EVICT_QUEUE *queue, u_int max_ent
     WT_REF *ref;
     uint64_t internal_pages_already_queued, internal_pages_queued, internal_pages_seen,
       update_pages_skipped, update_pages_wanted, pages_checkpoint_skipped, update_cant_evict,
-      update_cant_push, update_pages_retry_skipped;
+      update_cant_push, update_pages_retry_skipped, update_int_pages_skipped;
     uint64_t min_pages, pages_already_queued, pages_seen, pages_queued, refs_walked;
     uint32_t read_flags, remaining_slots, target_pages, walk_flags;
     int restarts;
@@ -1852,7 +1852,7 @@ __evict_walk_tree(WT_SESSION_IMPL *session, WT_EVICT_QUEUE *queue, u_int max_ent
      * case we are appending and only the last page in the file is live.
      */
     update_pages_skipped = update_pages_wanted = pages_checkpoint_skipped = update_cant_evict =
-      update_cant_push = update_pages_retry_skipped = 0;
+      update_cant_push = update_pages_retry_skipped = update_int_pages_skipped = 0;
     internal_pages_already_queued = internal_pages_queued = internal_pages_seen = 0;
     for (evict = start, pages_already_queued = pages_queued = pages_seen = refs_walked = 0;
          evict < end && (ret == 0 || ret == WT_NOTFOUND);
@@ -2011,11 +2011,13 @@ __evict_walk_tree(WT_SESSION_IMPL *session, WT_EVICT_QUEUE *queue, u_int max_ent
          */
         if (!F_ISSET(cache, WT_CACHE_EVICT_DEBUG_MODE) && F_ISSET(ref, WT_REF_FLAG_INTERNAL)) {
             if (page == last_parent) {
-                update_pages_retry_skipped++;
+                if (F_ISSET(cache, WT_CACHE_EVICT_UPDATES))
+                    update_int_pages_skipped++;
                 continue;
             }
             if (btree->evict_walk_period == 0 && !__wt_cache_aggressive(session)) {
-                update_pages_retry_skipped++;
+                if (F_ISSET(cache, WT_CACHE_EVICT_UPDATES))
+                    update_int_pages_skipped++;
                 continue;
             }
         }
@@ -2032,6 +2034,8 @@ __evict_walk_tree(WT_SESSION_IMPL *session, WT_EVICT_QUEUE *queue, u_int max_ent
          */
         if (!__wt_page_evict_retry(session, page) ||
           (modified && page->modify->update_txn >= conn->txn_global.last_running)) {
+            if (F_ISSET(cache, WT_CACHE_EVICT_UPDATES))
+                update_pages_retry_skipped++;
             continue;
         }
 
@@ -2112,6 +2116,7 @@ fast:
     WT_STAT_CONN_INCRV(session, cache_eviction_retry_skipped, update_pages_retry_skipped);
     WT_STAT_CONN_INCRV(session, cache_eviction_update_skipped, update_pages_skipped);
     WT_STAT_CONN_INCRV(session, cache_eviction_update_wanted, update_pages_wanted);
+    WT_STAT_CONN_INCRV(session, cache_eviction_update_int_pages_skipped, update_int_pages_skipped);
     WT_STAT_CONN_INCRV(session, cache_eviction_cant_evict, update_cant_evict);
     WT_STAT_CONN_INCRV(session, cache_eviction_cant_push, update_cant_push);
     WT_STAT_CONN_INCRV(session, cache_eviction_walk, refs_walked);
