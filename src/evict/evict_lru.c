@@ -1852,7 +1852,7 @@ __evict_walk_tree(WT_SESSION_IMPL *session, WT_EVICT_QUEUE *queue, u_int max_ent
      * case we are appending and only the last page in the file is live.
      */
     update_pages_skipped = update_pages_wanted = pages_checkpoint_skipped = update_cant_evict =
-      update_cant_push = 0;
+      update_cant_push = update_pages_retry_skipped = 0;
     internal_pages_already_queued = internal_pages_queued = internal_pages_seen = 0;
     for (evict = start, pages_already_queued = pages_queued = pages_seen = refs_walked = 0;
          evict < end && (ret == 0 || ret == WT_NOTFOUND);
