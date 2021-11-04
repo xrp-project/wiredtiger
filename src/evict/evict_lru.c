@@ -2010,10 +2010,14 @@ __evict_walk_tree(WT_SESSION_IMPL *session, WT_EVICT_QUEUE *queue, u_int max_ent
          * trees become completely idle, we eventually push them out of cache completely.
          */
         if (!F_ISSET(cache, WT_CACHE_EVICT_DEBUG_MODE) && F_ISSET(ref, WT_REF_FLAG_INTERNAL)) {
-            if (page == last_parent)
+            if (page == last_parent) {
+                update_pages_retry_skipped++;
                 continue;
-            if (btree->evict_walk_period == 0 && !__wt_cache_aggressive(session))
+            }
+            if (btree->evict_walk_period == 0 && !__wt_cache_aggressive(session)) {
+                update_pages_retry_skipped++;
                 continue;
+            }
         }
 
         /* If eviction gets aggressive, anything else is fair game. */
@@ -2028,7 +2032,6 @@ __evict_walk_tree(WT_SESSION_IMPL *session, WT_EVICT_QUEUE *queue, u_int max_ent
          */
         if (!__wt_page_evict_retry(session, page) ||
           (modified && page->modify->update_txn >= conn->txn_global.last_running)) {
-            update_pages_retry_skipped++;
             continue;
         }
 
