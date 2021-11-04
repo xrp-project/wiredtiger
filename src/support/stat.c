@@ -119,6 +119,7 @@ static const char *const __stats_dsrc_desc[] = {
   "cache: the number of times reverse modify inserted to history store",
   "cache: tracked dirty bytes in the cache",
   "cache: unmodified pages evicted",
+  "cache: updates pages retry skipped",
   "cache: updates pages skipped",
   "cache: updates pages wanted",
   "cache_walk: Average difference between current eviction generation when the page was last "
@@ -400,6 +401,7 @@ __wt_stat_dsrc_clear_single(WT_DSRC_STATS *stats)
     stats->cache_hs_insert_reverse_modify = 0;
     /* not clearing cache_bytes_dirty */
     stats->cache_eviction_clean = 0;
+    stats->cache_eviction_retry_skipped = 0;
     stats->cache_eviction_update_skipped = 0;
     stats->cache_eviction_update_wanted = 0;
     /* not clearing cache_state_gen_avg_gap */
@@ -668,6 +670,7 @@ __wt_stat_dsrc_aggregate_single(WT_DSRC_STATS *from, WT_DSRC_STATS *to)
     to->cache_hs_insert_reverse_modify += from->cache_hs_insert_reverse_modify;
     to->cache_bytes_dirty += from->cache_bytes_dirty;
     to->cache_eviction_clean += from->cache_eviction_clean;
+    to->cache_eviction_retry_skipped += from->cache_eviction_retry_skipped;
     to->cache_eviction_update_skipped += from->cache_eviction_update_skipped;
     to->cache_eviction_update_wanted += from->cache_eviction_update_wanted;
     to->cache_state_gen_avg_gap += from->cache_state_gen_avg_gap;
@@ -938,6 +941,7 @@ __wt_stat_dsrc_aggregate(WT_DSRC_STATS **from, WT_DSRC_STATS *to)
     to->cache_hs_insert_reverse_modify += WT_STAT_READ(from, cache_hs_insert_reverse_modify);
     to->cache_bytes_dirty += WT_STAT_READ(from, cache_bytes_dirty);
     to->cache_eviction_clean += WT_STAT_READ(from, cache_eviction_clean);
+    to->cache_eviction_retry_skipped += WT_STAT_READ(from, cache_eviction_retry_skipped);
     to->cache_eviction_update_skipped += WT_STAT_READ(from, cache_eviction_update_skipped);
     to->cache_eviction_update_wanted += WT_STAT_READ(from, cache_eviction_update_wanted);
     to->cache_state_gen_avg_gap += WT_STAT_READ(from, cache_state_gen_avg_gap);
@@ -1276,6 +1280,7 @@ static const char *const __stats_connection_desc[] = {
   "cache: tracked dirty bytes in the cache",
   "cache: tracked dirty pages in the cache",
   "cache: unmodified pages evicted",
+  "cache: updates pages retry skipped",
   "cache: updates pages skipped",
   "cache: updates pages wanted",
   "capacity: background fsync file handles considered",
@@ -1843,6 +1848,7 @@ __wt_stat_connection_clear_single(WT_CONNECTION_STATS *stats)
     /* not clearing cache_bytes_dirty */
     /* not clearing cache_pages_dirty */
     stats->cache_eviction_clean = 0;
+    stats->cache_eviction_retry_skipped = 0;
     stats->cache_eviction_update_skipped = 0;
     stats->cache_eviction_update_wanted = 0;
     stats->fsync_all_fh_total = 0;
@@ -2412,6 +2418,7 @@ __wt_stat_connection_aggregate(WT_CONNECTION_STATS **from, WT_CONNECTION_STATS *
     to->cache_bytes_dirty += WT_STAT_READ(from, cache_bytes_dirty);
     to->cache_pages_dirty += WT_STAT_READ(from, cache_pages_dirty);
     to->cache_eviction_clean += WT_STAT_READ(from, cache_eviction_clean);
+    to->cache_eviction_retry_skipped += WT_STAT_READ(from, cache_eviction_retry_skipped);
     to->cache_eviction_update_skipped += WT_STAT_READ(from, cache_eviction_update_skipped);
     to->cache_eviction_update_wanted += WT_STAT_READ(from, cache_eviction_update_wanted);
     to->fsync_all_fh_total += WT_STAT_READ(from, fsync_all_fh_total);

@@ -1707,7 +1707,7 @@ __evict_walk_tree(WT_SESSION_IMPL *session, WT_EVICT_QUEUE *queue, u_int max_ent
     WT_REF *ref;
     uint64_t internal_pages_already_queued, internal_pages_queued, internal_pages_seen,
       update_pages_skipped, update_pages_wanted, pages_checkpoint_skipped, update_cant_evict,
-      update_cant_push;
+      update_cant_push, update_pages_retry_skipped;
     uint64_t min_pages, pages_already_queued, pages_seen, pages_queued, refs_walked;
     uint32_t read_flags, remaining_slots, target_pages, walk_flags;
     int restarts;
@@ -2027,8 +2027,10 @@ __evict_walk_tree(WT_SESSION_IMPL *session, WT_EVICT_QUEUE *queue, u_int max_ent
          * evict the same page.
          */
         if (!__wt_page_evict_retry(session, page) ||
-          (modified && page->modify->update_txn >= conn->txn_global.last_running))
+          (modified && page->modify->update_txn >= conn->txn_global.last_running)) {
+            update_pages_retry_skipped++;
             continue;
+        }
 
 fast:
         /* If the page can't be evicted, give up. */
@@ -2104,10 +2106,11 @@ fast:
                 WT_RET_NOTFOUND_OK(__wt_tree_walk_count(session, &ref, &refs_walked, walk_flags));
         btree->evict_ref = ref;
     }
-    WT_STAT_CONN_INCRV(session, cache_eviction_update_skipped, update_pages_skipped);
-    WT_STAT_CONN_INCRV(session, cache_eviction_update_wanted, update_pages_wanted);
-    WT_STAT_CONN_INCRV(session, cache_eviction_cant_evict, update_cant_evict);
-    WT_STAT_CONN_INCRV(session, cache_eviction_cant_push, update_cant_push);
+    WT_STAT_CONN_SET(session, cache_eviction_retry_skipped, update_pages_retry_skipped)
+    WT_STAT_CONN_SET(session, cache_eviction_update_skipped, update_pages_skipped);
+    WT_STAT_CONN_SET(session, cache_eviction_update_wanted, update_pages_wanted);
+    WT_STAT_CONN_SET(session, cache_eviction_cant_evict, update_cant_evict);
+    WT_STAT_CONN_SET(session, cache_eviction_cant_push, update_cant_push);
     WT_STAT_CONN_INCRV(session, cache_eviction_walk, refs_walked);
     WT_STAT_CONN_INCRV(session, cache_checkpoint_skipped, pages_checkpoint_skipped);
     WT_STAT_CONN_DATA_INCRV(session, cache_eviction_pages_seen, pages_seen);
