@@ -391,6 +391,7 @@ struct __wt_connection_stats {
     int64_t cache_bytes_write;
     int64_t cache_lookaside_score;
     int64_t cache_eviction_checkpoint;
+    int64_t cache_eviction_cant_evict;
     int64_t cache_eviction_blocked_checkpoint_hs;
     int64_t cache_checkpoint_skipped;
     int64_t cache_eviction_get_ref;
@@ -911,6 +912,7 @@ struct __wt_dsrc_stats {
     int64_t cache_bytes_read;
     int64_t cache_bytes_write;
     int64_t cache_eviction_checkpoint;
+    int64_t cache_eviction_cant_evict;
     int64_t cache_eviction_blocked_checkpoint_hs;
     int64_t cache_checkpoint_skipped;
     int64_t cache_eviction_fail;
