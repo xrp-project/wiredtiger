@@ -2106,7 +2106,7 @@ fast:
                 WT_RET_NOTFOUND_OK(__wt_tree_walk_count(session, &ref, &refs_walked, walk_flags));
         btree->evict_ref = ref;
     }
-    WT_STAT_CONN_SET(session, cache_eviction_retry_skipped, update_pages_retry_skipped)
+    WT_STAT_CONN_SET(session, cache_eviction_retry_skipped, update_pages_retry_skipped);
     WT_STAT_CONN_SET(session, cache_eviction_update_skipped, update_pages_skipped);
     WT_STAT_CONN_SET(session, cache_eviction_update_wanted, update_pages_wanted);
     WT_STAT_CONN_SET(session, cache_eviction_cant_evict, update_cant_evict);
