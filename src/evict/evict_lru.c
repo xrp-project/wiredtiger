@@ -2554,9 +2554,11 @@ __verbose_dump_cache_single(WT_SESSION_IMPL *session, uint64_t *total_bytesp,
     uint64_t intl_bytes, intl_bytes_max, intl_dirty_bytes;
     uint64_t intl_dirty_bytes_max, intl_dirty_pages, intl_pages;
     uint64_t leaf_bytes, leaf_bytes_max, leaf_dirty_bytes;
-    uint64_t leaf_dirty_bytes_max, leaf_dirty_pages, leaf_pages, updates_bytes;
+    uint64_t leaf_dirty_bytes_max, leaf_dirty_pages, leaf_pages, updates_bytes, update_pages, overflow_key_parent;
+    WT_CACHE *cache;
+    uint64_t bytes_updates_plus_overhead;
 
-    intl_bytes = intl_bytes_max = intl_dirty_bytes = 0;
+    intl_bytes = intl_bytes_max = intl_dirty_bytes = update_pages = overflow_key_parent = 0;
     intl_dirty_bytes_max = intl_dirty_pages = intl_pages = 0;
     leaf_bytes = leaf_bytes_max = leaf_dirty_bytes = 0;
     leaf_dirty_bytes_max = leaf_dirty_pages = leaf_pages = 0;
@@ -2603,10 +2605,18 @@ __verbose_dump_cache_single(WT_SESSION_IMPL *session, uint64_t *total_bytesp,
                 leaf_dirty_bytes += size;
                 leaf_dirty_bytes_max = WT_MAX(leaf_dirty_bytes_max, size);
             }
-            if (page->modify != NULL)
+            if (page->modify != NULL) {
                 updates_bytes += page->modify->bytes_updates;
+                ++update_pages;
+            }
+
+            if (F_ISSET_ATOMIC(next_walk->home, WT_PAGE_OVERFLOW_KEYS))
+                ++overflow_key_parent;
         }
     }
+
+    cache = S2C(session)->cache;
+    bytes_updates_plus_overhead = __wt_cache_bytes_updates(cache);
 
     if (intl_pages == 0)
         WT_RET(__wt_msg(session, "internal: 0 pages"));
@@ -2631,14 +2641,16 @@ __verbose_dump_cache_single(WT_SESSION_IMPL *session, uint64_t *total_bytesp,
             "leaf: "
             "%" PRIu64 " pages, "
             "%" PRIu64 "MB, "
-            "%" PRIu64 "/%" PRIu64 " clean/dirty pages, "
+            "%" PRIu64 "/%" PRIu64 "/%" PRIu64 " clean/dirty/update pages, "
             "%" PRIu64 "/%" PRIu64 "/%" PRIu64 " clean/dirty/updates MB, "
             "%" PRIu64 "MB max page, "
-            "%" PRIu64 "MB max dirty page",
-            leaf_pages, leaf_bytes / WT_MEGABYTE, leaf_pages - leaf_dirty_pages, leaf_dirty_pages,
+            "%" PRIu64 "MB max dirty page, "
+            "%" PRIu64 "MB updates plus overhead, "
+            "%" PRIu64 " leaf pages with WT_PAGE_OVERFLOW_KEYS set in parent",
+            leaf_pages, leaf_bytes / WT_MEGABYTE, leaf_pages - leaf_dirty_pages, leaf_dirty_pages, update_pages,
             (leaf_bytes - leaf_dirty_bytes) / WT_MEGABYTE, leaf_dirty_bytes / WT_MEGABYTE,
             updates_bytes / WT_MEGABYTE, leaf_bytes_max / WT_MEGABYTE,
-            leaf_dirty_bytes_max / WT_MEGABYTE));
+            leaf_dirty_bytes_max / WT_MEGABYTE, bytes_updates_plus_overhead / WT_MEGABYTE, overflow_key_parent));
 
     *total_bytesp += intl_bytes + leaf_bytes;
     *total_dirty_bytesp += intl_dirty_bytes + leaf_dirty_bytes;
