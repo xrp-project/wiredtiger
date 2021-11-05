@@ -1653,7 +1653,6 @@ __wt_page_can_evict(WT_SESSION_IMPL *session, WT_REF *ref, bool *inmem_splitp)
     WT_PAGE *page;
     WT_PAGE_MODIFY *mod;
     bool modified;
-
     if (inmem_splitp != NULL)
         *inmem_splitp = false;
 
@@ -1670,8 +1669,10 @@ __wt_page_can_evict(WT_SESSION_IMPL *session, WT_REF *ref, bool *inmem_splitp)
      * created, which will be discarded as part of transaction resolution. Don't attempt to evict a
      * fast-truncate page until any update list has been removed.
      */
-    if (ref->ft_info.update != NULL)
+    if (ref->ft_info.update != NULL) {
+        WT_STAT_CONN_DATA_INCR(session, cache_eviction_ft_cant_evict);
         return (false);
+    }
 
     /*
      * We can't split or evict multiblock row-store pages where the parent's key for the page is an
@@ -1719,14 +1720,15 @@ __wt_page_can_evict(WT_SESSION_IMPL *session, WT_REF *ref, bool *inmem_splitp)
      */
     if (F_ISSET(ref, WT_REF_FLAG_INTERNAL) &&
       !F_ISSET(session->dhandle, WT_DHANDLE_DEAD | WT_DHANDLE_EXCLUSIVE) &&
-      __wt_gen_active(session, WT_GEN_SPLIT, page->pg_intl_split_gen))
+      __wt_gen_active(session, WT_GEN_SPLIT, page->pg_intl_split_gen)) {
+        WT_STAT_CONN_DATA_INCR(session, cache_eviction_internal_cant_evict);
         return (false);
+    }
 
     /* If the metadata page is clean but has modifications that appear too new to evict, skip it. */
     if (WT_IS_METADATA(S2BT(session)->dhandle) && !modified &&
       !__wt_txn_visible_all(session, mod->rec_max_txn, mod->rec_max_timestamp))
         return (false);
-
     return (true);
 }
 

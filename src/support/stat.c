@@ -120,6 +120,8 @@ static const char *const __stats_dsrc_desc[] = {
   "cache: tracked dirty bytes in the cache",
   "cache: unmodified pages evicted",
   "cache: update internal pages skipped",
+  "cache: updates internal pages cant evict",
+  "cache: updates pages ft cant evict",
   "cache: updates pages retry skipped",
   "cache: updates pages skipped",
   "cache: updates pages wanted",
@@ -403,6 +405,8 @@ __wt_stat_dsrc_clear_single(WT_DSRC_STATS *stats)
     /* not clearing cache_bytes_dirty */
     stats->cache_eviction_clean = 0;
     stats->cache_eviction_update_int_pages_skipped = 0;
+    stats->cache_eviction_internal_cant_evict = 0;
+    stats->cache_eviction_ft_cant_evict = 0;
     stats->cache_eviction_retry_skipped = 0;
     stats->cache_eviction_update_skipped = 0;
     stats->cache_eviction_update_wanted = 0;
@@ -673,6 +677,8 @@ __wt_stat_dsrc_aggregate_single(WT_DSRC_STATS *from, WT_DSRC_STATS *to)
     to->cache_bytes_dirty += from->cache_bytes_dirty;
     to->cache_eviction_clean += from->cache_eviction_clean;
     to->cache_eviction_update_int_pages_skipped += from->cache_eviction_update_int_pages_skipped;
+    to->cache_eviction_internal_cant_evict += from->cache_eviction_internal_cant_evict;
+    to->cache_eviction_ft_cant_evict += from->cache_eviction_ft_cant_evict;
     to->cache_eviction_retry_skipped += from->cache_eviction_retry_skipped;
     to->cache_eviction_update_skipped += from->cache_eviction_update_skipped;
     to->cache_eviction_update_wanted += from->cache_eviction_update_wanted;
@@ -946,6 +952,9 @@ __wt_stat_dsrc_aggregate(WT_DSRC_STATS **from, WT_DSRC_STATS *to)
     to->cache_eviction_clean += WT_STAT_READ(from, cache_eviction_clean);
     to->cache_eviction_update_int_pages_skipped +=
       WT_STAT_READ(from, cache_eviction_update_int_pages_skipped);
+    to->cache_eviction_internal_cant_evict +=
+      WT_STAT_READ(from, cache_eviction_internal_cant_evict);
+    to->cache_eviction_ft_cant_evict += WT_STAT_READ(from, cache_eviction_ft_cant_evict);
     to->cache_eviction_retry_skipped += WT_STAT_READ(from, cache_eviction_retry_skipped);
     to->cache_eviction_update_skipped += WT_STAT_READ(from, cache_eviction_update_skipped);
     to->cache_eviction_update_wanted += WT_STAT_READ(from, cache_eviction_update_wanted);
@@ -1286,6 +1295,8 @@ static const char *const __stats_connection_desc[] = {
   "cache: tracked dirty pages in the cache",
   "cache: unmodified pages evicted",
   "cache: update internal pages skipped",
+  "cache: updates internal pages cant evict",
+  "cache: updates pages ft cant evict",
   "cache: updates pages retry skipped",
   "cache: updates pages skipped",
   "cache: updates pages wanted",
@@ -1855,6 +1866,8 @@ __wt_stat_connection_clear_single(WT_CONNECTION_STATS *stats)
     /* not clearing cache_pages_dirty */
     stats->cache_eviction_clean = 0;
     stats->cache_eviction_update_int_pages_skipped = 0;
+    stats->cache_eviction_internal_cant_evict = 0;
+    stats->cache_eviction_ft_cant_evict = 0;
     stats->cache_eviction_retry_skipped = 0;
     stats->cache_eviction_update_skipped = 0;
     stats->cache_eviction_update_wanted = 0;
@@ -2427,6 +2440,9 @@ __wt_stat_connection_aggregate(WT_CONNECTION_STATS **from, WT_CONNECTION_STATS *
     to->cache_eviction_clean += WT_STAT_READ(from, cache_eviction_clean);
     to->cache_eviction_update_int_pages_skipped +=
       WT_STAT_READ(from, cache_eviction_update_int_pages_skipped);
+    to->cache_eviction_internal_cant_evict +=
+      WT_STAT_READ(from, cache_eviction_internal_cant_evict);
+    to->cache_eviction_ft_cant_evict += WT_STAT_READ(from, cache_eviction_ft_cant_evict);
     to->cache_eviction_retry_skipped += WT_STAT_READ(from, cache_eviction_retry_skipped);
     to->cache_eviction_update_skipped += WT_STAT_READ(from, cache_eviction_update_skipped);
     to->cache_eviction_update_wanted += WT_STAT_READ(from, cache_eviction_update_wanted);
