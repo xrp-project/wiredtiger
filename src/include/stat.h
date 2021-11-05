@@ -519,6 +519,7 @@ struct __wt_connection_stats {
     int64_t cache_eviction_update_int_pages_skipped;
     int64_t cache_eviction_internal_cant_evict;
     int64_t cache_eviction_ft_cant_evict;
+    int64_t cache_eviction_metadata_cant_evict;
     int64_t cache_eviction_retry_skipped;
     int64_t cache_eviction_update_skipped;
     int64_t cache_eviction_update_wanted;
@@ -978,6 +979,7 @@ struct __wt_dsrc_stats {
     int64_t cache_eviction_update_int_pages_skipped;
     int64_t cache_eviction_internal_cant_evict;
     int64_t cache_eviction_ft_cant_evict;
+    int64_t cache_eviction_metadata_cant_evict;
     int64_t cache_eviction_retry_skipped;
     int64_t cache_eviction_update_skipped;
     int64_t cache_eviction_update_wanted;

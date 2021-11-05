@@ -815,6 +815,7 @@ conn_dsrc_stats = [
     CacheStat('cache_eviction_retry_skipped', 'updates pages retry skipped'),
     CacheStat('cache_eviction_update_wanted', 'updates pages wanted'),
     CacheStat('cache_eviction_ft_cant_evict', 'updates pages ft cant evict'),
+    CacheStat('cache_eviction_metadata_cant_evict', 'updates pages metadata cant evict'),
     CacheStat('cache_eviction_internal_cant_evict', 'updates internal pages cant evict'),
     CacheStat('cache_checkpoint_skipped', 'checkpoint skip pages'),
     CacheStat('cache_eviction_cant_evict', 'checkpoint cant evict update pages'),

@@ -1727,8 +1727,10 @@ __wt_page_can_evict(WT_SESSION_IMPL *session, WT_REF *ref, bool *inmem_splitp)
 
     /* If the metadata page is clean but has modifications that appear too new to evict, skip it. */
     if (WT_IS_METADATA(S2BT(session)->dhandle) && !modified &&
-      !__wt_txn_visible_all(session, mod->rec_max_txn, mod->rec_max_timestamp))
+      !__wt_txn_visible_all(session, mod->rec_max_txn, mod->rec_max_timestamp)) {
+        WT_STAT_CONN_DATA_INCR(session, cache_eviction_metadata_cant_evict);
         return (false);
+    }
     return (true);
 }
 
