@@ -1329,6 +1329,55 @@ __rollback_to_stable_btree(WT_SESSION_IMPL *session, wt_timestamp_t rollback_tim
 }
 
 /*
+ * Questions:
+ * Iterating over the list twice in __rollback_to_stable_check
+ * below: good? bad? neither?
+ *
+ * This function is largely a dupe of __wt_tx_user_active, and
+ * __rollback_to_stable is the only user. Replace? I suspect yes.
+ *
+ * Should this return something? And should I not throw away the __wt_msg
+ * result?
+ *
+ * Formatting of message?
+ *
+ * How to test?
+ *
+ * Should I check dhandle != NULL?
+ *
+ * Any other comments?
+ */
+static void
+__report_active_transaction_sessions(WT_SESSION_IMPL *session)
+{
+    WT_CONNECTION_IMPL *conn;
+    WT_SESSION_IMPL *session_in_list;
+    WT_TXN_GLOBAL *txn_global;
+    WT_TXN_SHARED *txn_shared;
+    uint32_t i, session_cnt;
+
+    conn = S2C(session);
+    txn_global = &conn->txn_global;
+
+    __wt_writelock(session, &txn_global->rwlock);
+
+    WT_ORDERED_READ(session_cnt, conn->session_cnt);
+    WT_STAT_CONN_INCR(session, txn_walk_sessions);
+    for (i = 0, session_in_list = conn->sessions, txn_shared = txn_global->txn_shared_list;
+         i < session_cnt; i++, session_in_list++, txn_shared++) {
+
+        if (!session_in_list->active || F_ISSET(session_in_list, WT_SESSION_INTERNAL))
+            continue;
+
+        if (txn_shared->id != WT_TXN_NONE || txn_shared->pinned_id != WT_TXN_NONE)
+            WT_IGNORE_RET(__wt_msg(session_in_list, "session has active transaction in table %s",
+              session_in_list->dhandle->name));
+    }
+
+    __wt_writeunlock(session, &txn_global->rwlock);
+}
+
+/*
  * __rollback_to_stable_check --
  *     Ensure the rollback request is reasonable.
  */
@@ -1348,8 +1397,10 @@ __rollback_to_stable_check(WT_SESSION_IMPL *session)
         WT_TRET(__wt_verbose_dump_txn(session));
 #endif
 
-    if (txn_active)
+    if (txn_active) {
+        __report_active_transaction_sessions(session);
         WT_RET_MSG(session, EINVAL, "rollback_to_stable illegal with active transactions");
+    }
 
     return (ret);
 }
