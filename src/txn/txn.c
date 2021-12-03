@@ -983,7 +983,7 @@ __txn_commit_timestamps_usage_check(WT_SESSION_IMPL *session, WT_TXN_OP *op, WT_
             WT_ASSERT(session, false);
     }
 
-    if (FLD_ISSET(ts_flags, WT_DHANDLE_TS_MIXED_MODE) && F_ISSET(txn, WT_TXN_HAS_TS_COMMIT) &&
+    if (FLD_ISSET(ts_flags, WT_DHANDLE_TS_MIXED_MODE) && txn_has_ts &&
       op_ts != WT_TS_NONE && prev_op_durable_ts > op_ts) {
         if (verbose_messaging_enabled)
             WT_RET(__wt_msg(session,
@@ -996,6 +996,11 @@ __txn_commit_timestamps_usage_check(WT_SESSION_IMPL *session, WT_TXN_OP *op, WT_
         if (write_ts_assert_enabled)
             WT_ASSERT(session, false);
     }
+
+    if (FLD_ISSET(ts_flags, WT_DHANDLE_TS_KEY_CONSISTENT)) {
+
+    }
+
     return (0);
 }
 
