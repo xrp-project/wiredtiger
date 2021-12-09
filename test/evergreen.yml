@@ -49,7 +49,7 @@ functions:
     - command: archive.targz_extract
       params:
         path: "WT_TEST-little-endian.tgz"
-        destination: "wiredtiger/build_posix/test/format"
+        destination: "wiredtiger/cmake_build/test/format"
   "fetch artifacts from big-endian" :
     - command: s3.get
       params:
@@ -61,7 +61,7 @@ functions:
     - command: archive.targz_extract
       params:
         path: "WT_TEST-big-endian.tgz"
-        destination: "wiredtiger/build_posix/test/format"
+        destination: "wiredtiger/cmake_build/test/format"
   "fetch artifacts from many-coll" :
     - command: s3.get
       params:
