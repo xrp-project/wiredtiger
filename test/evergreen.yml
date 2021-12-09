@@ -1020,7 +1020,7 @@ tasks:
 
   # Start of cppsuite test tasks.
   # All cppsuite pull request tasks must supply the relative path to the config file as we are in
-  # the build_posix working directory and the LD_LIBRARY_PATH is .libs.
+  # the cmake build working directory and the LD_LIBRARY_PATH is .libs.
 
   - name: cppsuite-base-test-default
     tags: ["pull_request"]
@@ -1030,7 +1030,7 @@ tasks:
       - func: "fetch artifacts"
       - command: shell.exec
         params:
-          working_dir: "wiredtiger/build_posix/"
+          working_dir: "wiredtiger/cmake_build/"
           script: |
             set -o errexit
             set -o verbose
@@ -1045,7 +1045,7 @@ tasks:
       - func: "fetch artifacts"
       - command: shell.exec
         params:
-          working_dir: "wiredtiger/build_posix/"
+          working_dir: "wiredtiger/cmake_build/"
           script: |
             set -o errexit
             set -o verbose
@@ -1060,7 +1060,7 @@ tasks:
       - func: "fetch artifacts"
       - command: shell.exec
         params:
-          working_dir: "wiredtiger/build_posix/"
+          working_dir: "wiredtiger/cmake_build/"
           script: |
             set -o errexit
             set -o verbose
@@ -1076,7 +1076,7 @@ tasks:
       - func: "fetch artifacts"
       - command: shell.exec
         params:
-          working_dir: "wiredtiger/build_posix/test/cppsuite"
+          working_dir: "wiredtiger/cmake_build/test/cppsuite"
           script: |
             set -o errexit
             set -o verbose
@@ -1090,7 +1090,7 @@ tasks:
       - func: "fetch artifacts"
       - command: shell.exec
         params:
-          working_dir: "wiredtiger/build_posix/test/cppsuite"
+          working_dir: "wiredtiger/cmake_build/test/cppsuite"
           script: |
             set -o errexit
             set -o verbose
@@ -1104,7 +1104,7 @@ tasks:
       - func: "fetch artifacts"
       - command: shell.exec
         params:
-          working_dir: "wiredtiger/build_posix/"
+          working_dir: "wiredtiger/cmake_build/"
           script: |
             set -o errexit
             set -o verbose
