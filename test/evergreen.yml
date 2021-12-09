@@ -2037,7 +2037,7 @@ tasks:
           extra_args: -h "WT_TEST.$i"
       - command: shell.exec
         params:
-          working_dir: "wiredtiger/build_posix/test/format"
+          working_dir: "wiredtiger/cmake_build/test/format"
           shell: bash
           script: |
             set -o errexit
@@ -2048,7 +2048,7 @@ tasks:
         params:
           aws_secret: ${aws_secret}
           aws_key: ${aws_key}
-          local_file: wiredtiger/build_posix/test/format/WT_TEST.tgz
+          local_file: wiredtiger/cmake_build/test/format/WT_TEST.tgz
           bucket: build_external
           permissions: public-read
           content_type: application/tar
@@ -2099,7 +2099,7 @@ tasks:
           extra_args: -h "WT_TEST.$i"
       - command: shell.exec
         params:
-          working_dir: "wiredtiger/build_posix/test/format"
+          working_dir: "wiredtiger/cmake_build/test/format"
           shell: bash
           script: |
             set -o errexit
@@ -2110,7 +2110,7 @@ tasks:
         params:
           aws_secret: ${aws_secret}
           aws_key: ${aws_key}
-          local_file: wiredtiger/build_posix/test/format/WT_TEST.tgz
+          local_file: wiredtiger/cmake_build/test/format/WT_TEST.tgz
           bucket: build_external
           permissions: public-read
           content_type: application/tar
