@@ -38,30 +38,14 @@ functions:
       remote_file: wiredtiger/${build_variant}/${revision}/artifacts/${dependent_task|compile}_${build_id}.tgz
       bucket: build_external
       extract_to: ${destination|wiredtiger}
-  "fetch artifacts from little-endian" :
+  "fetch endian format artifacts" :
     - command: s3.get
       params:
         aws_key: ${aws_key}
         aws_secret: ${aws_secret}
-        remote_file: wiredtiger/little-endian/${revision}/artifacts/WT_TEST.tgz
+        remote_file: wiredtiger/${endian_format}/${revision}/artifacts/${remote_file}.tgz
         bucket: build_external
-        local_file: WT_TEST-little-endian.tgz
-    - command: archive.targz_extract
-      params:
-        path: "WT_TEST-little-endian.tgz"
-        destination: "wiredtiger/cmake_build/test/format"
-  "fetch artifacts from big-endian" :
-    - command: s3.get
-      params:
-        aws_key: ${aws_key}
-        aws_secret: ${aws_secret}
-        remote_file: wiredtiger/big-endian/${revision}/artifacts/WT_TEST.tgz
-        bucket: build_external
-        local_file: WT_TEST-big-endian.tgz
-    - command: archive.targz_extract
-      params:
-        path: "WT_TEST-big-endian.tgz"
-        destination: "wiredtiger/cmake_build/test/format"
+        extract_to: wiredtiger/cmake_build/test/format
   "fetch mongo-tests repo" :
     command: shell.exec
     params:
@@ -464,6 +448,17 @@ functions:
         content_type: application/tar
         display_name: Artifacts
         remote_file: wiredtiger/${build_variant}/${revision}/artifacts/${task_name}_${build_id}${postfix|}.tgz
+  "upload endian format artifacts":
+    - command: s3.put
+      params:
+        aws_secret: ${aws_secret}
+        aws_key: ${aws_key}
+        local_file: ${local_file}
+        bucket: build_external
+        permissions: public-read
+        content_type: application/tar
+        display_name: WT_TEST
+        remote_file: wiredtiger/${endian_format}/${revision}/artifacts/${remote_file}
   "cleanup":
     command: shell.exec
     params:
@@ -615,6 +610,15 @@ functions:
           ${virtualenv_binary} -p ${python_binary} venv
           source venv/bin/activate
           ${python_binary} ../../../bench/perf_run_py/validate_expected_stats.py '${stat_file}' ${comparison_op} '${expected-stats}'
+
+  "verify wt datafiles":
+    - command: shell.exec
+      params:
+        working_dir: "wiredtiger"
+        script: |
+          set -o errexit
+          set -o verbose
+          ./test/evergreen/verify_wt_datafiles.sh 2>&1
 
 #######################################
 #               Variables             #
@@ -1003,7 +1007,7 @@ tasks:
 
             ${test_env_vars|} $(pwd)/test/cppsuite/run -t hs_cleanup -C 'debug_mode=(cursor_copy=true)' -f test/cppsuite/configs/hs_cleanup_default.txt -l 2
 
-  - name: cppsuite-search-near-default
+  - name: cppsuite-search-near-01-default
     tags: ["pull_request"]
     depends_on:
       - name: compile
@@ -1017,7 +1021,35 @@ tasks:
             set -o verbose
 
             ${test_env_vars|} $(pwd)/test/cppsuite/run -t search_near_01 -f test/cppsuite/configs/search_near_01_default.txt -l 2
+
+  - name: cppsuite-search-near-02-default
+    tags: ["pull_request"]
+    depends_on:
+      - name: compile
+    commands:
+      - func: "fetch artifacts"
+      - command: shell.exec
+        params:
+          working_dir: "wiredtiger/build_posix/"
+          script: |
+            set -o errexit
+            set -o verbose
+
             ${test_env_vars|} $(pwd)/test/cppsuite/run -t search_near_02 -f test/cppsuite/configs/search_near_02_default.txt -l 2
+  
+  - name: cppsuite-search-near-03-default
+    tags: ["pull_request"]
+    depends_on:
+      - name: compile
+    commands:
+      - func: "fetch artifacts"
+      - command: shell.exec
+        params:
+          working_dir: "wiredtiger/build_posix/"
+          script: |
+            set -o errexit
+            set -o verbose
+
             ${test_env_vars|} $(pwd)/test/cppsuite/run -t search_near_03 -f test/cppsuite/configs/search_near_03_default.txt -l 2
 
   - name: cppsuite-base-test-stress
@@ -1048,7 +1080,7 @@ tasks:
 
             ${test_env_vars|} $(pwd)/run -t hs_cleanup -f configs/hs_cleanup_stress.txt -l 2
   
-  - name: cppsuite-search-near-stress
+  - name: cppsuite-search-near-01-stress
     depends_on:
       - name: compile
     commands:
@@ -1061,7 +1093,33 @@ tasks:
             set -o verbose
 
             ${test_env_vars|} $(pwd)/test/cppsuite/run -t search_near_01 -f test/cppsuite/configs/search_near_01_stress.txt -l 2
+
+  - name: cppsuite-search-near-02-stress
+    depends_on:
+      - name: compile
+    commands:
+      - func: "fetch artifacts"
+      - command: shell.exec
+        params:
+          working_dir: "wiredtiger/build_posix/"
+          script: |
+            set -o errexit
+            set -o verbose
+
             ${test_env_vars|} $(pwd)/test/cppsuite/run -t search_near_02 -f test/cppsuite/configs/search_near_02_stress.txt -l 2
+
+  - name: cppsuite-search-near-03-stress
+    depends_on:
+      - name: compile
+    commands:
+      - func: "fetch artifacts"
+      - command: shell.exec
+        params:
+          working_dir: "wiredtiger/build_posix/"
+          script: |
+            set -o errexit
+            set -o verbose
+
             ${test_env_vars|} $(pwd)/test/cppsuite/run -t search_near_03 -f test/cppsuite/configs/search_near_03_stress.txt -l 2
 
   # End of cppsuite test tasks.
@@ -1916,6 +1974,17 @@ tasks:
             set -o verbose
             test/evergreen/compatibility_test_for_releases.sh -o
 
+  - name: compatibility-test-upgrade-to-latest
+    commands:
+      - func: "get project"
+      - command: shell.exec
+        params:
+          working_dir: "wiredtiger"
+          script: |
+            set -o errexit
+            set -o verbose
+            test/evergreen/compatibility_test_for_releases.sh -u
+
   - name: compatibility-test-for-wt-standalone-releases
     commands:
       - func: "get project"
@@ -1956,18 +2025,14 @@ tasks:
           script: |
             set -o errexit
             set -o verbose
-            # Archive the WT_TEST directories which include the generated wt data files
+            # Archive the WT_TEST directories which include the generated wt data files. We cannot
+            # use the Evergreen archive command as we need to archive multiple WT_TEST folders.
             tar -zcvf WT_TEST.tgz WT_TEST*
-      - command: s3.put
-        params:
-          aws_secret: ${aws_secret}
-          aws_key: ${aws_key}
+      - func: "upload endian format artifacts"
+        vars:
+          endian_format: little-endian
           local_file: wiredtiger/cmake_build/test/format/WT_TEST.tgz
-          bucket: build_external
-          permissions: public-read
-          content_type: application/tar
-          display_name: WT_TEST
-          remote_file: wiredtiger/little-endian/${revision}/artifacts/WT_TEST.tgz
+          remote_file: WT_TEST-little-endian.tgz
 
   - name: verify-datafile-little-endian
     depends_on:
@@ -1975,14 +2040,11 @@ tasks:
     - name: generate-datafile-little-endian
     commands:
       - func: "fetch artifacts"
-      - func: "fetch artifacts from little-endian"
-      - command: shell.exec
-        params:
-          working_dir: "wiredtiger"
-          script: |
-            set -o errexit
-            set -o verbose
-            ./test/evergreen/verify_wt_datafiles.sh 2>&1
+      - func: "fetch endian format artifacts"
+        vars:
+          endian_format: little-endian
+          remote_file: WT_TEST-little-endian
+      - func: "verify wt datafiles"
 
   - name: verify-datafile-from-little-endian
     depends_on:
@@ -1991,14 +2053,11 @@ tasks:
       variant: little-endian
     commands:
       - func: "fetch artifacts"
-      - func: "fetch artifacts from little-endian"
-      - command: shell.exec
-        params:
-          working_dir: "wiredtiger"
-          script: |
-            set -o errexit
-            set -o verbose
-            ./test/evergreen/verify_wt_datafiles.sh 2>&1
+      - func: "fetch endian format artifacts"
+        vars:
+          endian_format: little-endian
+          remote_file: WT_TEST-little-endian
+      - func: "verify wt datafiles"
 
   - name: generate-datafile-big-endian
     depends_on:
@@ -2018,18 +2077,14 @@ tasks:
           script: |
             set -o errexit
             set -o verbose
-            # Archive the WT_TEST directories which include the generated wt data files
+            # Archive the WT_TEST directories which include the generated wt data files. We cannot
+            # use the Evergreen archive command as we need to archive multiple WT_TEST folders.
             tar -zcvf WT_TEST.tgz WT_TEST*
-      - command: s3.put
-        params:
-          aws_secret: ${aws_secret}
-          aws_key: ${aws_key}
+      - func: "upload endian format artifacts"
+        vars:
+          endian_format: big-endian
           local_file: wiredtiger/cmake_build/test/format/WT_TEST.tgz
-          bucket: build_external
-          permissions: public-read
-          content_type: application/tar
-          display_name: WT_TEST
-          remote_file: wiredtiger/big-endian/${revision}/artifacts/WT_TEST.tgz
+          remote_file: WT_TEST-big-endian.tgz
 
   - name: verify-datafile-big-endian
     depends_on:
@@ -2037,14 +2092,11 @@ tasks:
     - name: generate-datafile-big-endian
     commands:
       - func: "fetch artifacts"
-      - func: "fetch artifacts from big-endian"
-      - command: shell.exec
-        params:
-          working_dir: "wiredtiger"
-          script: |
-            set -o errexit
-            set -o verbose
-            ./test/evergreen/verify_wt_datafiles.sh 2>&1
+      - func: "fetch endian format artifacts"
+        vars:
+          endian_format: big-endian
+          remote_file: WT_TEST-big-endian
+      - func: "verify wt datafiles"
 
   - name: verify-datafile-from-big-endian
     depends_on:
@@ -2053,14 +2105,11 @@ tasks:
       variant: big-endian
     commands:
       - func: "fetch artifacts"
-      - func: "fetch artifacts from big-endian"
-      - command: shell.exec
-        params:
-          working_dir: "wiredtiger"
-          script: |
-            set -o errexit
-            set -o verbose
-            ./test/evergreen/verify_wt_datafiles.sh 2>&1
+      - func: "fetch endian format artifacts"
+        vars:
+          endian_format: big-endian
+          remote_file: WT_TEST-big-endian
+      - func: "verify wt datafiles"
 
   - name: clang-analyzer
     tags: ["pull_request"]
@@ -3855,7 +3904,9 @@ buildvariants:
     - name: make-check-test
     - name: cppsuite-base-test-default
     - name: cppsuite-hs-cleanup-default
-    - name: cppsuite-search-near-default
+    - name: cppsuite-search-near-01-default
+    - name: cppsuite-search-near-02-default
+    - name: cppsuite-search-near-03-default
 
 - name: ubuntu2004-compilers
   display_name: "! Ubuntu 20.04 Compilers"
@@ -4019,7 +4070,9 @@ buildvariants:
     - name: compile
     - name: cppsuite-base-test-stress
     - name: cppsuite-hs-cleanup-stress
-    - name: cppsuite-search-near-stress
+    - name: cppsuite-search-near-01-stress
+    - name: cppsuite-search-near-02-stress
+    - name: cppsuite-search-near-03-stress
 
 - name: package
   display_name: "~ Package"
@@ -4124,6 +4177,14 @@ buildvariants:
   tasks:
     - name: compatibility-test-for-older-releases
     - name: compatibility-test-for-wt-standalone-releases
+
+- name: compatibility-tests-daily
+  display_name: Compatibility tests (daily)
+  batchtime: 1440 # 1 day
+  run_on:
+  - ubuntu2004-test
+  tasks:
+    - name: compatibility-test-upgrade-to-latest
 
 - name: compatibility-tests
   display_name: Compatibility tests
