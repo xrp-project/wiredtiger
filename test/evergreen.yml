@@ -1030,7 +1030,7 @@ tasks:
       - func: "fetch artifacts"
       - command: shell.exec
         params:
-          working_dir: "wiredtiger/build_posix/"
+          working_dir: "wiredtiger/cmake_build"
           script: |
             set -o errexit
             set -o verbose
@@ -1045,7 +1045,7 @@ tasks:
       - func: "fetch artifacts"
       - command: shell.exec
         params:
-          working_dir: "wiredtiger/build_posix/"
+          working_dir: "wiredtiger/cmake_build"
           script: |
             set -o errexit
             set -o verbose
@@ -1101,7 +1101,7 @@ tasks:
       - func: "fetch artifacts"
       - command: shell.exec
         params:
-          working_dir: "wiredtiger/build_posix/"
+          working_dir: "wiredtiger/cmake_build"
           script: |
             set -o errexit
             set -o verbose
@@ -1115,7 +1115,7 @@ tasks:
       - func: "fetch artifacts"
       - command: shell.exec
         params:
-          working_dir: "wiredtiger/build_posix/"
+          working_dir: "wiredtiger/cmake_build"
           script: |
             set -o errexit
             set -o verbose
