@@ -285,7 +285,13 @@ upgrade_downgrade()
 #############################################################
 test_upgrade_to_branch()
 {
-        cd $1/test/checkpoint
+        cd $1/build/test/checkpoint
+
+        if [ "${build_sys[$1]}" == "cmake" ]; then
+            test_bin="test_checkpoint"
+        else
+            test_bin="t"
+        fi
 
         for FILE in $2/*; do
             # Run actual test.
@@ -295,7 +301,7 @@ test_upgrade_to_branch()
             # Disable exit on non 0
             set +e
 
-            output="$(./t -t r -D -v -h $FILE)"
+            output="$(./$test_bin -t r -D -v -h $FILE)"
             test_res=$?
 
             # Enable exit on non 0
