@@ -25,37 +25,41 @@
 # ARISING FROM, OUT OF OR IN CONNECTION WITH THE SOFTWARE OR THE USE OR
 # OTHER DEALINGS IN THE SOFTWARE.
 #
+set(CMAKE_CXX_STANDARD 11)
+project(s3_store CXX)
 
-project(ext C CXX)
+# Use shared libraries
+set(BUILD_SHARED_LIBS ON CACHE STRING "Link to shared libraries by default.")
 
-# Build the compressor extensions.
-add_subdirectory(compressors/lz4)
-add_subdirectory(compressors/snappy)
-add_subdirectory(compressors/zlib)
-add_subdirectory(compressors/zstd)
-add_subdirectory(compressors/nop)
+set(sources "s3_store.cpp")
+add_library(wiredtiger_s3_store MODULE ${sources})
 
-# Build the collator extensions.
-add_subdirectory(collators/reverse)
-add_subdirectory(collators/revint)
+find_package(AWSSDK REQUIRED COMPONENTS s3-crt)
+find_package(ZLIB)
 
-# Build the encryptor extensions.
-add_subdirectory(encryptors/nop)
+target_include_directories(
+    wiredtiger_s3_store
+    PRIVATE
+        ${CMAKE_SOURCE_DIR}/src/include
+        ${CMAKE_BINARY_DIR}/include
+        ${CMAKE_BINARY_DIR}/config
+        ${AWSSDK_INCLUDE_DIRS}
+)
+target_compile_options(
+    wiredtiger_s3_store
+    PRIVATE ${COMPILER_DIAGNOSTIC_CXX_FLAGS}
+    #-Wno-unused-const-variable
+    #-Wno-switch-enum
+    #-Wno-undef
+)
 
-# Build the extractor extensions.
-add_subdirectory(extractors/csv)
+target_link_libraries(
+    wiredtiger_s3_store
+    PRIVATE ${AWSSDK_LINK_LIBRARIES}
+    ZLIB::ZLIB
+)
 
-# We currently don't support these tests extensions on non-POSIX systems since they are designed around the
-# existence of POSIX utilities or certain system headers e.g Linux signals.
-if(WT_POSIX)
-    # Build the encryptor extensions.
-    add_subdirectory(encryptors/rotn)
-    add_subdirectory(encryptors/sodium)
-
-    # Build the storage_sources extensions.
-    add_subdirectory(storage_sources/local_store)
-    add_subdirectory(storage_sources/s3_store)
-
-    # Build the test extensions.
-    add_subdirectory(test/fail_fs)
-endif()
+install(TARGETS wiredtiger_s3_store
+    LIBRARY DESTINATION ${CMAKE_INSTALL_LIBDIR}
+    ARCHIVE DESTINATION ${CMAKE_INSTALL_LIBDIR}
+)
