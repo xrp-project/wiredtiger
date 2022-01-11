@@ -113,12 +113,12 @@ __sweep_expire(WT_SESSION_IMPL *session, uint64_t now)
         /*
          * Ignore open files once the btree file count is below the minimum number of handles.
          */
-        if (conn->open_btree_count < conn->sweep_handles_min)
+        if (conn->open_btree_count < conn->sweep.sweep_handles_min)
             break;
 
         if (WT_IS_METADATA(dhandle) || !F_ISSET(dhandle, WT_DHANDLE_OPEN) ||
           dhandle->session_inuse != 0 || dhandle->timeofdeath == 0 ||
-          now - dhandle->timeofdeath <= conn->sweep_idle_time)
+          now - dhandle->timeofdeath <= conn->sweep.sweep_idle_time)
             continue;
 
         /*
@@ -268,9 +268,9 @@ __sweep_server(void *arg)
     session = arg;
     conn = S2C(session);
     if (FLD_ISSET(conn->timing_stress_flags, WT_TIMING_STRESS_AGGRESSIVE_SWEEP))
-        sweep_interval = conn->sweep_interval / 10;
+        sweep_interval = conn->sweep.sweep_interval / 10;
     else
-        sweep_interval = conn->sweep_interval;
+        sweep_interval = conn->sweep.sweep_interval;
 
     /*
      * Sweep for dead and excess handles.
@@ -279,11 +279,12 @@ __sweep_server(void *arg)
     for (;;) {
         /* Wait until the next event. */
         if (FLD_ISSET(conn->timing_stress_flags, WT_TIMING_STRESS_AGGRESSIVE_SWEEP))
-            __wt_cond_wait_signal(session, conn->sweep_cond,
-              conn->sweep_interval * 100 * WT_THOUSAND, __sweep_server_run_chk, &cv_signalled);
+            __wt_cond_wait_signal(session, conn->sweep.sweep_cond,
+              conn->sweep.sweep_interval * 100 * WT_THOUSAND, __sweep_server_run_chk,
+              &cv_signalled);
         else
-            __wt_cond_wait_signal(session, conn->sweep_cond, conn->sweep_interval * WT_MILLION,
-              __sweep_server_run_chk, &cv_signalled);
+            __wt_cond_wait_signal(session, conn->sweep.sweep_cond,
+              conn->sweep.sweep_interval * WT_MILLION, __sweep_server_run_chk, &cv_signalled);
 
         /* Check if we're quitting or being reconfigured. */
         if (!__sweep_server_run_chk(session))
@@ -310,14 +311,15 @@ __sweep_server(void *arg)
          * Mark handles with a time of death, and report whether any handles are marked dead. If
          * sweep_idle_time is 0, handles never become idle.
          */
-        if (conn->sweep_idle_time != 0)
+        if (conn->sweep.sweep_idle_time != 0)
             __sweep_mark(session, now);
 
         /*
          * Close handles if we have reached the configured limit. If sweep_idle_time is 0, handles
          * never become idle.
          */
-        if (conn->sweep_idle_time != 0 && conn->open_btree_count >= conn->sweep_handles_min)
+        if (conn->sweep.sweep_idle_time != 0 &&
+          conn->open_btree_count >= conn->sweep.sweep_handles_min)
             WT_ERR(__sweep_expire(session, now));
 
         WT_ERR(__sweep_discard_trees(session, &dead_handles));
@@ -352,18 +354,18 @@ __wt_sweep_config(WT_SESSION_IMPL *session, const char *cfg[])
      * A non-zero idle time is incompatible with in-memory, and the default is non-zero; set the
      * in-memory configuration idle time to zero.
      */
-    conn->sweep_idle_time = 0;
+    conn->sweep.sweep_idle_time = 0;
     WT_RET(__wt_config_gets(session, cfg, "in_memory", &cval));
     if (cval.val == 0) {
         WT_RET(__wt_config_gets(session, cfg, "file_manager.close_idle_time", &cval));
-        conn->sweep_idle_time = (uint64_t)cval.val;
+        conn->sweep.sweep_idle_time = (uint64_t)cval.val;
     }
 
     WT_RET(__wt_config_gets(session, cfg, "file_manager.close_scan_interval", &cval));
-    conn->sweep_interval = (uint64_t)cval.val;
+    conn->sweep.sweep_interval = (uint64_t)cval.val;
 
     WT_RET(__wt_config_gets(session, cfg, "file_manager.close_handle_minimum", &cval));
-    conn->sweep_handles_min = (uint64_t)cval.val;
+    conn->sweep.sweep_handles_min = (uint64_t)cval.val;
 
     return (0);
 }
@@ -389,13 +391,13 @@ __wt_sweep_create(WT_SESSION_IMPL *session)
      */
     session_flags = WT_SESSION_CAN_WAIT | WT_SESSION_IGNORE_CACHE_SIZE;
     WT_RET(__wt_open_internal_session(
-      conn, "sweep-server", true, session_flags, 0, &conn->sweep_session));
-    session = conn->sweep_session;
+      conn, "sweep-server", true, session_flags, 0, &conn->sweep.sweep_session));
+    session = conn->sweep.sweep_session;
 
-    WT_RET(__wt_cond_alloc(session, "handle sweep server", &conn->sweep_cond));
+    WT_RET(__wt_cond_alloc(session, "handle sweep server", &conn->sweep.sweep_cond));
 
-    WT_RET(__wt_thread_create(session, &conn->sweep_tid, __sweep_server, session));
-    conn->sweep_tid_set = 1;
+    WT_RET(__wt_thread_create(session, &conn->sweep.sweep_tid, __sweep_server, session));
+    conn->sweep.sweep_tid_set = 1;
 
     return (0);
 }
@@ -413,17 +415,17 @@ __wt_sweep_destroy(WT_SESSION_IMPL *session)
     conn = S2C(session);
 
     FLD_CLR(conn->server_flags, WT_CONN_SERVER_SWEEP);
-    if (conn->sweep_tid_set) {
-        __wt_cond_signal(session, conn->sweep_cond);
-        WT_TRET(__wt_thread_join(session, &conn->sweep_tid));
-        conn->sweep_tid_set = 0;
+    if (conn->sweep.sweep_tid_set) {
+        __wt_cond_signal(session, conn->sweep.sweep_cond);
+        WT_TRET(__wt_thread_join(session, &conn->sweep.sweep_tid));
+        conn->sweep.sweep_tid_set = 0;
     }
-    __wt_cond_destroy(session, &conn->sweep_cond);
+    __wt_cond_destroy(session, &conn->sweep.sweep_cond);
 
-    if (conn->sweep_session != NULL) {
-        WT_TRET(__wt_session_close_internal(conn->sweep_session));
+    if (conn->sweep.sweep_session != NULL) {
+        WT_TRET(__wt_session_close_internal(conn->sweep.sweep_session));
 
-        conn->sweep_session = NULL;
+        conn->sweep.sweep_session = NULL;
     }
 
     return (ret);

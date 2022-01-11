@@ -210,6 +210,16 @@ struct __wt_name_flag {
         (conn)->hot_backup_list = NULL;                      \
     } while (0)
 
+struct __wt_conn_sweep {
+    WT_SESSION_IMPL *sweep_session; /* Handle sweep session */
+    wt_thread_t sweep_tid;          /* Handle sweep thread */
+    int sweep_tid_set;              /* Handle sweep thread set */
+    WT_CONDVAR *sweep_cond;         /* Handle sweep wait mutex */
+    uint64_t sweep_idle_time;       /* Handle sweep idle time */
+    uint64_t sweep_interval;        /* Handle sweep interval */
+    uint64_t sweep_handles_min;     /* Handle sweep minimum open */
+};
+
 /*
  * WT_CONNECTION_IMPL --
  *	Implementation of WT_CONNECTION
@@ -494,13 +504,7 @@ struct __wt_connection_impl {
      */
     bool modified;
 
-    WT_SESSION_IMPL *sweep_session; /* Handle sweep session */
-    wt_thread_t sweep_tid;          /* Handle sweep thread */
-    int sweep_tid_set;              /* Handle sweep thread set */
-    WT_CONDVAR *sweep_cond;         /* Handle sweep wait mutex */
-    uint64_t sweep_idle_time;       /* Handle sweep idle time */
-    uint64_t sweep_interval;        /* Handle sweep interval */
-    uint64_t sweep_handles_min;     /* Handle sweep minimum open */
+    WT_CONN_SWEEP sweep;
 
     /* Locked: collator list */
     TAILQ_HEAD(__wt_coll_qh, __wt_named_collator) collqh;
