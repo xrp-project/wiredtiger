@@ -38,8 +38,9 @@ class test_compact(wttest.WiredTigerTestCase, suite_subprocess):
     name = 'test_compact'
 
     # Use a small page size because we want to create lots of pages.
-    config = 'allocation_size=512,' +\
-        'leaf_page_max=512,key_format=S'
+    config = 'allocation_size=512,leaf_page_max=512,key_format=S'
+    # ,leaf_key_max=10,leaf_value_max=10'
+    # config = 'key_format=S'
     nentries = 50000
 
     # The table is a complex object, give it roughly 5 pages per underlying
@@ -55,10 +56,11 @@ class test_compact(wttest.WiredTigerTestCase, suite_subprocess):
     ]
     scenarios = make_scenarios(types, compact)
 
-    # Configure the connection so that eviction doesn't happen (which could
-    # skew our compaction results).
-    conn_config = 'cache_size=1GB,eviction_checkpoint_target=80,' +\
-        'eviction_dirty_target=80,eviction_dirty_trigger=95,statistics=(all)'
+    # Configure the connection so that eviction doesn't happen (which could skew our compaction
+    # results).
+    conn_config = 'cache_size=1GB,eviction_checkpoint_target=80,' + \
+        'eviction_dirty_target=80,eviction_dirty_trigger=95,statistics=(all),statistics_log=(wait=1,json=true,on_close=true,sources=[\"file:\"])'
+        # 'eviction_dirty_target=80,eviction_dirty_trigger=95,statistics=(all),statistics_log=(wait=1,json=true,on_close=true,sources=[\"file:\"]),json_output=[message],verbose=[compact,compact_progress,evict,evict_stuck,evictserver]'
 
     # Return stats that track the progress of compaction.
     def getCompactProgressStats(self, uri):
@@ -75,9 +77,9 @@ class test_compact(wttest.WiredTigerTestCase, suite_subprocess):
     def test_compact(self):
         # FIXME-WT-7187
         # This test is temporarily disabled for OS/X, it fails often, but not consistently.
-        import platform
-        if platform.system() == 'Darwin':
-            self.skipTest('Compaction tests skipped, as they fail on OS/X')
+        # import platform
+        # if platform.system() == 'Darwin':
+        #     self.skipTest('Compaction tests skipped, as they fail on OS/X')
 
         # Populate an object
         uri = self.type + self.name
@@ -121,9 +123,9 @@ class test_compact(wttest.WiredTigerTestCase, suite_subprocess):
             self.assertGreater(statDict["pages_reviewed"],0)
             self.assertGreater(statDict["pages_rewritten"],0)
             self.assertEqual(statDict["pages_rewritten"] + statDict["pages_skipped"],
-                                statDict["pages_reviewed"])
+                statDict["pages_reviewed"])
 
-        # Confirm compaction worked: check the number of on-disk pages
+        # Confirm compaction worked: check the number of on-disk pages.
         self.reopen_conn()
         stat_cursor = self.session.open_cursor('statistics:' + uri, None, None)
         self.assertLess(stat_cursor[stat.dsrc.btree_row_leaf][2], self.maxpages)

@@ -111,7 +111,7 @@ class test_compact02(wttest.WiredTigerTestCase):
         self.home = '.'
         conn_params = 'create,' + \
             cacheSize + ',error_prefix="%s",' % self.shortid() + \
-            'statistics=(all),' + \
+            'statistics=(all),statistics_log=(wait=1,json),' + \
             'eviction_dirty_target=80,eviction_dirty_trigger=99'
         try:
             self.conn = wiredtiger.wiredtiger_open(self.home, conn_params)
@@ -125,9 +125,9 @@ class test_compact02(wttest.WiredTigerTestCase):
 
         # FIXME-WT-7187
         # This test is temporarily disabled for OS/X, it fails, but not consistently.
-        import platform
-        if platform.system() == 'Darwin':
-            self.skipTest('Compaction tests skipped, as they fail on OS/X')
+        # import platform
+        # if platform.system() == 'Darwin':
+        #     self.skipTest('Compaction tests skipped, as they fail on OS/X')
 
         self.ConnectionOpen(self.cacheSize)
 

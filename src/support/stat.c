@@ -102,6 +102,7 @@ static const char *const __stats_dsrc_desc[] = {
   "cache: leaf pages split during eviction",
   "cache: modified pages evicted",
   "cache: overflow pages read into cache",
+  "cache: overflow pages read into cache (usecs)",
   "cache: page split during eviction deepened the tree",
   "cache: page written requiring history store records",
   "cache: pages read into cache",
@@ -376,6 +377,7 @@ __wt_stat_dsrc_clear_single(WT_DSRC_STATS *stats)
     stats->cache_eviction_split_leaf = 0;
     stats->cache_eviction_dirty = 0;
     stats->cache_read_overflow = 0;
+    stats->cache_read_overflow_time = 0;
     stats->cache_eviction_deepen = 0;
     stats->cache_write_hs = 0;
     stats->cache_read = 0;
@@ -636,6 +638,7 @@ __wt_stat_dsrc_aggregate_single(WT_DSRC_STATS *from, WT_DSRC_STATS *to)
     to->cache_eviction_split_leaf += from->cache_eviction_split_leaf;
     to->cache_eviction_dirty += from->cache_eviction_dirty;
     to->cache_read_overflow += from->cache_read_overflow;
+    to->cache_read_overflow_time += from->cache_read_overflow_time;
     to->cache_eviction_deepen += from->cache_eviction_deepen;
     to->cache_write_hs += from->cache_write_hs;
     to->cache_read += from->cache_read;
@@ -897,6 +900,7 @@ __wt_stat_dsrc_aggregate(WT_DSRC_STATS **from, WT_DSRC_STATS *to)
     to->cache_eviction_split_leaf += WT_STAT_READ(from, cache_eviction_split_leaf);
     to->cache_eviction_dirty += WT_STAT_READ(from, cache_eviction_dirty);
     to->cache_read_overflow += WT_STAT_READ(from, cache_read_overflow);
+    to->cache_read_overflow_time += WT_STAT_READ(from, cache_read_overflow_time);
     to->cache_eviction_deepen += WT_STAT_READ(from, cache_eviction_deepen);
     to->cache_write_hs += WT_STAT_READ(from, cache_write_hs);
     to->cache_read += WT_STAT_READ(from, cache_read);
@@ -1206,6 +1210,7 @@ static const char *const __stats_connection_desc[] = {
   "cache: modified pages evicted by application threads",
   "cache: operations timed out waiting for space in cache",
   "cache: overflow pages read into cache",
+  "cache: overflow pages read into cache (usecs)",
   "cache: page split during eviction deepened the tree",
   "cache: page written requiring history store records",
   "cache: pages currently held in the cache",
@@ -1768,6 +1773,7 @@ __wt_stat_connection_clear_single(WT_CONNECTION_STATS *stats)
     stats->cache_eviction_app_dirty = 0;
     stats->cache_timed_out_ops = 0;
     stats->cache_read_overflow = 0;
+    stats->cache_read_overflow_time = 0;
     stats->cache_eviction_deepen = 0;
     stats->cache_write_hs = 0;
     /* not clearing cache_pages_inuse */
@@ -2320,6 +2326,7 @@ __wt_stat_connection_aggregate(WT_CONNECTION_STATS **from, WT_CONNECTION_STATS *
     to->cache_eviction_app_dirty += WT_STAT_READ(from, cache_eviction_app_dirty);
     to->cache_timed_out_ops += WT_STAT_READ(from, cache_timed_out_ops);
     to->cache_read_overflow += WT_STAT_READ(from, cache_read_overflow);
+    to->cache_read_overflow_time += WT_STAT_READ(from, cache_read_overflow_time);
     to->cache_eviction_deepen += WT_STAT_READ(from, cache_eviction_deepen);
     to->cache_write_hs += WT_STAT_READ(from, cache_write_hs);
     to->cache_pages_inuse += WT_STAT_READ(from, cache_pages_inuse);

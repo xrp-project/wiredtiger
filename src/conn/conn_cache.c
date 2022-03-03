@@ -155,6 +155,10 @@ __cache_config_local(WT_SESSION_IMPL *session, bool shared, const char *cfg[])
     WT_RET(__wt_config_gets(session, cfg, "cache_max_wait_ms", &cval));
     cache->cache_max_wait_us = (uint64_t)(cval.val * WT_THOUSAND);
 
+    // printf("eviction_dirty_target is %f\n", cache->eviction_dirty_target);
+    // printf("eviction_dirty_trigger is %f\n", cache->eviction_dirty_trigger);
+    // printf("eviction_updates_target is %f\n", cache->eviction_updates_target);
+    // printf("eviction_updates_trigger is %f\n", cache->eviction_updates_trigger);
     return (0);
 }
 

@@ -266,8 +266,7 @@ class ComplexDataSet(BaseDataSet):
         tablepart = self.uri.split(":")[1] + ':'
         session = self.testcase.session
         for index in self.indexlist[4:]:
-            session.create('index:' + tablepart + index[0],
-                           ',columns=(' + index[1] + ')')
+            session.create('index:' + tablepart + index[0], ',columns=(' + index[1] + ')')
 
     def colgroup_count(self):
         return len(self.cglist)

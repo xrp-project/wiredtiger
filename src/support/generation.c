@@ -166,6 +166,8 @@ __wt_gen_drain(WT_SESSION_IMPL *session, int which, uint64_t generation)
                     __wt_verbose_notice(session, WT_VERB_GENERATION,
                       "%s generation drain waited %u minutes", __gen_name(which), minutes);
                     ++minutes;
+                    if (minutes >= 4)
+                        WT_IGNORE_RET(__wt_verbose_dump_cache(session));
                     WT_ASSERT(session, minutes < 4);
                 }
             }
