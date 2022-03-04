@@ -100,8 +100,8 @@ class test_tiered11(wttest.WiredTigerTestCase):
         for i in range(start, end):
             self.session.begin_transaction()
             c[i] = i
-            # Jump the commit TS to leave rooom for the stable TS separate from any commit TS.
-            self.session.commit_transaction('commit_timestamp=' + self.timestamp_str(i * 2))
+            self.session.commit_transaction(
+              'commit_timestamp=' + self.timestamp_str(i))
         # Set the oldest and stable timestamp to the end.
         end_ts = self.timestamp_str(end-1)
         self.conn.set_timestamp('oldest_timestamp=' + end_ts + ',stable_timestamp=' + end_ts)

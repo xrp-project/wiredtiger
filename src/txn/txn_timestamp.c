@@ -521,7 +521,10 @@ __txn_assert_after_reads(WT_SESSION_IMPL *session, const char *op, wt_timestamp_
 
 /*
  * __wt_txn_set_commit_timestamp --
- *     Validate the commit timestamp of a transaction.
+ *     Validate the commit timestamp of a transaction. If the commit timestamp is less than the
+ *     oldest timestamp and transaction is configured to roundup timestamps of a prepared
+ *     transaction, then we will roundup the commit timestamp to the prepare timestamp of the
+ *     transaction.
  */
 int
 __wt_txn_set_commit_timestamp(WT_SESSION_IMPL *session, wt_timestamp_t commit_ts)
@@ -563,17 +566,10 @@ __wt_txn_set_commit_timestamp(WT_SESSION_IMPL *session, wt_timestamp_t commit_ts
               __wt_timestamp_to_string(commit_ts, ts_string[0]),
               __wt_timestamp_to_string(oldest_ts, ts_string[1]));
 
-#ifdef WT_STANDALONE_BUILD
-        if (has_stable_ts && commit_ts <= stable_ts)
-            WT_RET_MSG(session, EINVAL, "commit timestamp %s must be after the stable timestamp %s",
-              __wt_timestamp_to_string(commit_ts, ts_string[0]),
-              __wt_timestamp_to_string(stable_ts, ts_string[1]));
-#else
         if (has_stable_ts && commit_ts < stable_ts)
-            WT_RET_MSG(session, EINVAL, "commit timestamp %s is before the stable timestamp %s",
+            WT_RET_MSG(session, EINVAL, "commit timestamp %s is less than the stable timestamp %s",
               __wt_timestamp_to_string(commit_ts, ts_string[0]),
               __wt_timestamp_to_string(stable_ts, ts_string[1]));
-#endif
 
         /*
          * Compare against the commit timestamp of the current transaction. Return an error if the
@@ -591,10 +587,6 @@ __wt_txn_set_commit_timestamp(WT_SESSION_IMPL *session, wt_timestamp_t commit_ts
          * For a prepared transaction, the commit timestamp should not be less than the prepare
          * timestamp. Also, the commit timestamp cannot be set before the transaction has actually
          * been prepared.
-         *
-         * If the commit timestamp is less than the oldest timestamp and transaction is configured
-         * to roundup timestamps of a prepared transaction, then we will roundup the commit
-         * timestamp to the prepare timestamp of the transaction.
          */
         if (txn->prepare_timestamp > commit_ts) {
             if (!F_ISSET(txn, WT_TXN_TS_ROUND_PREPARED))
@@ -667,22 +659,19 @@ __wt_txn_set_durable_timestamp(WT_SESSION_IMPL *session, wt_timestamp_t durable_
     if (has_stable_ts)
         stable_ts = txn_global->stable_timestamp;
 
+    /*
+     * For a non-prepared transactions the commit timestamp should not be less than the stable
+     * timestamp.
+     */
     if (has_oldest_ts && durable_ts < oldest_ts)
         WT_RET_MSG(session, EINVAL, "durable timestamp %s is less than the oldest timestamp %s",
           __wt_timestamp_to_string(durable_ts, ts_string[0]),
           __wt_timestamp_to_string(oldest_ts, ts_string[1]));
 
-#ifdef WT_STANDALONE_BUILD
-    if (has_stable_ts && durable_ts <= stable_ts)
-        WT_RET_MSG(session, EINVAL, "durable timestamp %s must be after the stable timestamp %s",
-          __wt_timestamp_to_string(durable_ts, ts_string[0]),
-          __wt_timestamp_to_string(stable_ts, ts_string[1]));
-#else
     if (has_stable_ts && durable_ts < stable_ts)
         WT_RET_MSG(session, EINVAL, "durable timestamp %s is less than the stable timestamp %s",
           __wt_timestamp_to_string(durable_ts, ts_string[0]),
           __wt_timestamp_to_string(stable_ts, ts_string[1]));
-#endif
 
     /* Check if the durable timestamp is less than the commit timestamp. */
     if (durable_ts < txn->commit_timestamp)
