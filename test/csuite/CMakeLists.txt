@@ -5,6 +5,15 @@ include(${CMAKE_SOURCE_DIR}/cmake/helpers.cmake)
 set(c_tests)
 
 define_c_test(
+    TARGET test_bf24385_insert_race
+    SOURCES bf24385_insert_race/main.c
+    DIR_NAME bf24385_insert_race
+    EXEC_SCRIPT ${CMAKE_CURRENT_SOURCE_DIR}/bf24385_insert_race/smoke.sh
+    ARGUMENTS $<TARGET_FILE:test_bf24385_insert_race>
+    DEPENDS "WT_POSIX"
+)
+
+define_c_test(
     TARGET test_incr_backup
     SOURCES incr_backup/main.c
     DIR_NAME incr_backup
