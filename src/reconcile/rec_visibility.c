@@ -186,8 +186,9 @@ err:
  */
 static inline bool
 __rec_need_save_upd(
-  WT_SESSION_IMPL *session, WT_RECONCILE *r, WT_UPDATE_SELECT *upd_select, bool has_newer_updates)
+		    WT_SESSION_IMPL *session, WT_RECONCILE *r, WT_UPDATE_SELECT *upd_select, bool has_newer_updates, int globally_visible)
 {
+    bool tmp;
     if (upd_select->tw.prepare)
         return (true);
 
@@ -206,6 +207,9 @@ __rec_need_save_upd(
     if (F_ISSET(r, WT_REC_CHECKPOINT) && upd_select->upd == NULL)
         return (false);
 
+    tmp = __wt_txn_tw_stop_visible_all(session, &upd_select->tw);
+    if (globally_visible != 0)
+        WT_ASSERT(session, tmp ? globally_visible == 1 : globally_visible == 2);
     if (WT_TIME_WINDOW_HAS_STOP(&upd_select->tw))
         return (!__wt_txn_tw_stop_visible_all(session, &upd_select->tw));
     else
@@ -379,6 +383,7 @@ __wt_rec_upd_select(WT_SESSION_IMPL *session, WT_RECONCILE *r, WT_INSERT *ins, W
     size_t upd_memsize;
     uint64_t max_txn, session_txnid, txnid;
     bool has_newer_updates, is_hs_page, supd_restore, upd_saved;
+    int globally_visible = 0;
 
     /*
      * The "saved updates" return value is used independently of returning an update we can write,
@@ -457,7 +462,7 @@ __wt_rec_upd_select(WT_SESSION_IMPL *session, WT_RECONCILE *r, WT_INSERT *ins, W
                 WT_UPDATE_RESTORED_FROM_HS) &&
           !is_hs_page &&
           (F_ISSET(r, WT_REC_VISIBLE_ALL) ? WT_TXNID_LE(r->last_running, txnid) :
-                                            !__txn_visible_id(session, txnid))) {
+	                                    !__txn_visible_id(session, txnid))) {
             /*
              * Rare case: when applications run at low isolation levels, eviction may see a
              * committed update followed by uncommitted updates. Give up in that case because we
@@ -575,12 +580,15 @@ __wt_rec_upd_select(WT_SESSION_IMPL *session, WT_RECONCILE *r, WT_INSERT *ins, W
 
             /* Find the update this tombstone applies to. */
             if (!__wt_txn_upd_visible_all(session, upd)) {
+	        globally_visible = 2;
                 while (upd->next != NULL && upd->next->txnid == WT_TXN_ABORTED)
                     upd = upd->next;
 
                 WT_ASSERT(session, upd->next == NULL || upd->next->txnid != WT_TXN_ABORTED);
                 upd_select->upd = upd = upd->next;
-            }
+	    } else {
+	        globally_visible = 1;
+	    }
         }
 
         if (upd != NULL)
@@ -636,6 +644,8 @@ __wt_rec_upd_select(WT_SESSION_IMPL *session, WT_RECONCILE *r, WT_INSERT *ins, W
                      * If the tombstone is aborted concurrently, we should still have appended the
                      * onpage value.
                      */
+		    if (globally_visible != 0)
+		      WT_ASSERT(session, globally_visible == (__wt_txn_upd_visible_all(session, tombstone) ? 1 : 2));
                     WT_ASSERT(session,
                       tombstone->txnid != WT_TXN_ABORTED &&
                         __wt_txn_upd_visible_all(session, tombstone) && upd_select->upd == NULL);
@@ -716,14 +726,7 @@ __wt_rec_upd_select(WT_SESSION_IMPL *session, WT_RECONCILE *r, WT_INSERT *ins, W
         WT_RET(EBUSY);
     }
 
-    /*
-     * The update doesn't have any further updates that need to be written to the history store,
-     * skip saving the update as saving the update will cause reconciliation to think there is work
-     * that needs to be done when there might not be.
-     *
-     * Additionally history store reconciliation is not set skip saving an update.
-     */
-    if (__rec_need_save_upd(session, r, upd_select, has_newer_updates)) {
+    if (__rec_need_save_upd(session, r, upd_select, has_newer_updates, globally_visible)) {
         /*
          * We should restore the update chains to the new disk image if there are newer updates in
          * eviction, or for cases that don't support history store, such as an in-memory database.

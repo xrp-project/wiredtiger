@@ -37,23 +37,23 @@ from wtscenario import make_scenarios
 class test_rollback_to_stable13(test_rollback_to_stable_base):
 
     format_values = [
-        ('column', dict(key_format='r', value_format='S')),
-        ('column_fix', dict(key_format='r', value_format='8t')),
+        # ('column', dict(key_format='r', value_format='S')),
+        # ('column_fix', dict(key_format='r', value_format='8t')),
         ('row_integer', dict(key_format='i', value_format='S')),
     ]
 
     prepare_values = [
-        ('no_prepare', dict(prepare=False)),
+        # ('no_prepare', dict(prepare=False)),
         ('prepare', dict(prepare=True))
     ]
 
     scenarios = make_scenarios(format_values, prepare_values)
 
     def conn_config(self):
-        config = 'cache_size=50MB,statistics=(all)'
+        config = 'cache_size=15MB,statistics=(all),statistics_log=(json,wait=0,on_close)'
         return config
 
-    def test_rollback_to_stable(self):
+    def __test_rollback_to_stable(self):
         nrows = 1000
 
         # Create a table.
@@ -108,7 +108,7 @@ class test_rollback_to_stable13(test_rollback_to_stable_base):
         restored_tombstones = stat_cursor[stat.conn.txn_rts_hs_restore_tombstones][2]
         self.assertEqual(restored_tombstones, nrows)
 
-    def test_rollback_to_stable_with_aborted_updates(self):
+    def __test_rollback_to_stable_with_aborted_updates(self):
         nrows = 1000
 
         # Create a table.
@@ -183,7 +183,7 @@ class test_rollback_to_stable13(test_rollback_to_stable_base):
         restored_tombstones = stat_cursor[stat.conn.txn_rts_hs_restore_tombstones][2]
         self.assertEqual(restored_tombstones, nrows)
 
-    def test_rollback_to_stable_with_history_tombstone(self):
+    def __test_rollback_to_stable_with_history_tombstone(self):
         nrows = 1000
 
         # Create a table.
