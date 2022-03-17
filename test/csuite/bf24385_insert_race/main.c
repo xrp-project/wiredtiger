@@ -27,13 +27,16 @@
  */
 #include "test_util.h"
 
+/*
+ * The motivation for this test is to try and reproduce BF-24385 by stressing insert functionality.
+ * The test creates a lot of threads that insert a lot of records with random keys. Having a large
+ * memory page ensures that we have big insert lists. Big cache size allows having more dirty
+ * content in the memory before eviction kicks in.
+ */
+
 #define THREAD_NUM_ITERATIONS 200000
 #define NUM_THREADS 110
 #define KEY_MAX UINT32_MAX
-
-/*
- * JIRA ticket reference: TODO
- */
 
 void *thread_insert_race(void *);
 
@@ -64,38 +67,19 @@ set_value(TEST_OPTS *opts, WT_CURSOR *c, uint64_t value)
 }
 
 /*
- * get_value --
- *     Wrapper providing the correct typing for the WT_CURSOR::get_value variadic argument.
- */
-/*static uint64_t
-get_value(TEST_OPTS *opts, WT_CURSOR *c)
-{
-    uint64_t value64;
-    uint8_t value8;
-
-    if (opts->table_type == TABLE_FIX) {
-        testutil_check(c->get_value(c, &value8));
-        return (value8);
-    } else {
-        testutil_check(c->get_value(c, &value64));
-        return (value64);
-    }
-}*/
-
-/*
  * main --
- *     TODO: Add a comment describing this function.
+ *     Test's entry point.
  */
 int
 main(int argc, char *argv[])
 {
     TEST_OPTS *opts, _opts;
+    WT_CURSOR *cursor;
     WT_SESSION *session;
     clock_t ce, cs;
     pthread_t id[NUM_THREADS];
     int i, ret;
     char tableconf[128];
-    WT_CURSOR *cursor;
 
     opts = &_opts;
     memset(opts, 0, sizeof(*opts));
@@ -104,18 +88,18 @@ main(int argc, char *argv[])
     testutil_check(testutil_parse_opts(argc, argv, opts));
     testutil_make_work_dir(opts->home);
 
-    testutil_check(wiredtiger_open(opts->home, NULL,
-      "create,cache_size=2G,eviction=(threads_max=5),statistics=(fast)", &opts->conn));
+    testutil_check(
+      wiredtiger_open(opts->home, NULL, "create,cache_size=3G,statistics=(fast)", &opts->conn));
     testutil_check(opts->conn->open_session(opts->conn, NULL, NULL, &session));
     testutil_check(__wt_snprintf(tableconf, sizeof(tableconf),
-      "key_format=%s,value_format=%s,leaf_page_max=32k,memory_page_image_max=50MB", opts->table_type == TABLE_ROW ? "Q" : "r",
-      opts->table_type == TABLE_FIX ? "8t" : "Q"));
+      "key_format=%s,value_format=%s,leaf_page_max=32k,memory_page_image_max=50MB",
+      opts->table_type == TABLE_ROW ? "Q" : "r", opts->table_type == TABLE_FIX ? "8t" : "Q"));
     testutil_check(session->create(session, opts->uri, tableconf));
-    
+
     __wt_random_init_seed((WT_SESSION_IMPL *)session, &rnd);
-    
+
     cs = clock();
-    
+
     /* Multithreaded insert */
     for (i = 0; i < (int)opts->nthreads; ++i)
         testutil_check(pthread_create(&id[i], NULL, thread_insert_race, opts));
@@ -127,7 +111,7 @@ main(int argc, char *argv[])
     testutil_check(opts->conn->close(opts->conn, NULL));
     opts->conn = NULL;
     testutil_check(wiredtiger_open(opts->home, NULL,
-      "create,cache_size=2G,eviction=(threads_max=1),statistics=(fast)", &opts->conn));
+      "create,cache_size=4G,eviction=(threads_max=1),statistics=(fast)", &opts->conn));
 
     /* Validate */
     testutil_check(opts->conn->open_session(opts->conn, NULL, NULL, &session));
@@ -140,7 +124,8 @@ main(int argc, char *argv[])
     testutil_assert(ret == WT_NOTFOUND);
 
     ce = clock();
-    printf("Number of records: %" PRIu64 "\nDuration: %.2lf\n", (uint64_t)i, (ce - cs) / (double)CLOCKS_PER_SEC);
+    printf(" Number of records: %" PRIu64 "\n Duration: %.2lf\n", (uint64_t)i,
+      (ce - cs) / (double)CLOCKS_PER_SEC);
 
     testutil_cleanup(opts);
     return (EXIT_SUCCESS);
@@ -148,8 +133,7 @@ main(int argc, char *argv[])
 
 /*
  * thread_insert_race --
- *     Append to a table in a "racy" fashion - that is attempt to insert the same record another
- *     thread is likely to also be inserting.
+ *     Insert items with random keys.
  */
 WT_THREAD_RET
 thread_insert_race(void *arg)

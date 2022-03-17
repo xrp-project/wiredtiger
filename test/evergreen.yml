@@ -1105,6 +1105,16 @@ tasks:
   # End of cppsuite test tasks.
   # Start of csuite test tasks
 
+  - name: csuite-bf24385-insert-race-test
+    tags: ["pull_request"]
+    depends_on:
+      - name: compile
+    commands:
+      - func: "fetch artifacts"
+      - func: "csuite test"
+        vars:
+          test_name: bf24385_insert_race
+
   - name: csuite-incr-backup-test
     tags: ["pull_request"]
     depends_on:
