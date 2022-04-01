@@ -430,7 +430,7 @@ __rec_root_write(WT_SESSION_IMPL *session, WT_PAGE *page, uint32_t flags)
         WT_ASSERT(session, mod->mod_multi[i].disk_image == NULL);
 
         WT_ERR(
-          __wt_multi_to_ref(session, next, &mod->mod_multi[i], &pindex->index[i], NULL, false));
+          __wt_multi_to_ref(session, next, &mod->mod_multi[i], &pindex->index[i], NULL, false, NULL));
         pindex->index[i]->home = next;
     }
 

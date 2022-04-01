@@ -15,6 +15,8 @@
         (to_incr) += __len;                      \
     } while (0)
 
+#define WT_CHECK_IKEY  if (ikey != NULL && ((uint8_t *)WT_IKEY_DATA(ikey))[0] == 171) { __wt_abort(session);  }
+
 /*
  * A note on error handling: main split functions first allocate/initialize new structures; failures
  * during that period are handled by discarding the memory and returning an error code, the caller
@@ -630,7 +632,7 @@ __split_parent_discard_ref(WT_SESSION_IMPL *session, WT_REF *ref, WT_PAGE *paren
  */
 static int
 __split_parent(WT_SESSION_IMPL *session, WT_REF *ref, WT_REF **ref_new, uint32_t new_entries,
-  size_t parent_incr, bool exclusive, bool discard)
+  size_t parent_incr, bool exclusive, bool discard, WT_IKEY *ikey)
 {
     WT_BTREE *btree;
     WT_DECL_ITEM(scr);
@@ -659,12 +661,16 @@ __split_parent(WT_SESSION_IMPL *session, WT_REF *ref, WT_REF **ref_new, uint32_t
     WT_RET(__wt_page_modify_init(session, parent));
     __wt_page_modify_set(session, parent);
 
+    WT_CHECK_IKEY
+
     /*
      * We've locked the parent, which means it cannot split (which is the only reason to worry about
      * split generation values).
      */
     pindex = WT_INTL_INDEX_GET_SAFE(parent);
     parent_entries = pindex->entries;
+
+    WT_CHECK_IKEY
 
     /*
      * Remove any refs to deleted pages while we are splitting, we have the internal page locked
@@ -692,6 +698,8 @@ __split_parent(WT_SESSION_IMPL *session, WT_REF *ref, WT_REF **ref_new, uint32_t
             }
         }
 
+    WT_CHECK_IKEY
+
     /*
      * The final entry count is the original count, where one entry will be replaced by some number
      * of new entries, and some number will be deleted.
@@ -708,6 +716,8 @@ __split_parent(WT_SESSION_IMPL *session, WT_REF *ref, WT_REF **ref_new, uint32_t
             __wt_page_evict_soon(session, parent->pg_intl_parent_ref);
         goto err;
     }
+
+    WT_CHECK_IKEY
 
     /*
      * Allocate and initialize a new page index array for the parent, then copy references from the
@@ -732,7 +742,7 @@ __split_parent(WT_SESSION_IMPL *session, WT_REF *ref, WT_REF **ref_new, uint32_t
             }
             continue;
         }
-
+        WT_CHECK_IKEY
         /* Skip refs we have marked for deletion. */
         if (deleted_entries != 0) {
             for (j = 0; j < deleted_entries; ++j)
@@ -745,13 +755,13 @@ __split_parent(WT_SESSION_IMPL *session, WT_REF *ref, WT_REF **ref_new, uint32_t
         next_ref->pindex_hint = hint++;
         *alloc_refp++ = next_ref;
     }
-
+    WT_CHECK_IKEY
     /* Check we filled in the expected number of entries. */
     WT_ASSERT(session, alloc_refp - alloc_index->index == (ptrdiff_t)result_entries);
 
     /* Start making real changes to the tree, errors are fatal. */
     WT_NOT_READ(complete, WT_ERR_PANIC);
-
+    WT_CHECK_IKEY
     /* Encourage a race */
     __wt_timing_stress(session, WT_TIMING_STRESS_SPLIT_3);
 
@@ -762,7 +772,7 @@ __split_parent(WT_SESSION_IMPL *session, WT_REF *ref, WT_REF **ref_new, uint32_t
     WT_ASSERT(session, WT_INTL_INDEX_GET_SAFE(parent) == pindex);
     WT_INTL_INDEX_SET(parent, alloc_index);
     alloc_index = NULL;
-
+    WT_CHECK_IKEY
     /* Encourage a race */
     __wt_timing_stress(session, WT_TIMING_STRESS_SPLIT_4);
 
@@ -774,7 +784,7 @@ __split_parent(WT_SESSION_IMPL *session, WT_REF *ref, WT_REF **ref_new, uint32_t
     WT_FULL_BARRIER();
     split_gen = __wt_gen(session, WT_GEN_SPLIT);
     parent->pg_intl_split_gen = split_gen;
-
+    WT_CHECK_IKEY
 #ifdef HAVE_DIAGNOSTIC
     WT_WITH_PAGE_INDEX(session, __split_verify_intl_key_order(session, parent));
 #endif
@@ -1024,7 +1034,7 @@ __split_internal(WT_SESSION_IMPL *session, WT_PAGE *parent, WT_PAGE *page)
 
     /* Split into the parent. */
     WT_ERR(__split_parent(
-      session, page_ref, alloc_index->index, alloc_index->entries, parent_incr, false, false));
+      session, page_ref, alloc_index->index, alloc_index->entries, parent_incr, false, false, NULL));
 
     /*
      * Confirm the page's index hasn't moved, then update it, which makes the split visible to
@@ -1624,7 +1634,7 @@ __split_multi_inmem_fail(WT_SESSION_IMPL *session, WT_PAGE *orig, WT_MULTI *mult
  */
 int
 __wt_multi_to_ref(WT_SESSION_IMPL *session, WT_PAGE *page, WT_MULTI *multi, WT_REF **refp,
-  size_t *incrp, bool closing)
+  size_t *incrp, bool closing, WT_IKEY **new_key)
 {
     WT_ADDR *addr;
     WT_IKEY *ikey;
@@ -1664,6 +1674,8 @@ __wt_multi_to_ref(WT_SESSION_IMPL *session, WT_PAGE *page, WT_MULTI *multi, WT_R
     case WT_PAGE_ROW_LEAF:
         ikey = multi->key.ikey;
         WT_RET(__wt_row_ikey(session, 0, WT_IKEY_DATA(ikey), ikey->size, ref));
+        if (new_key != NULL)
+            *new_key = ref->ref_ikey;
         if (incrp)
             *incrp += sizeof(WT_IKEY) + ikey->size;
         break;
@@ -1945,7 +1957,7 @@ __split_insert(WT_SESSION_IMPL *session, WT_REF *ref)
     /*
      * Split into the parent.
      */
-    if ((ret = __split_parent(session, ref, split_ref, 2, parent_incr, false, true)) == 0)
+    if ((ret = __split_parent(session, ref, split_ref, 2, parent_incr, false, true, NULL)) == 0)
         return (0);
 
     /*
@@ -2059,11 +2071,15 @@ __split_multi(WT_SESSION_IMPL *session, WT_REF *ref, bool closing)
     WT_PAGE *page;
     WT_PAGE_MODIFY *mod;
     WT_REF **ref_new;
+    bool first;
+    WT_IKEY *ikey;
     size_t parent_incr;
     uint32_t i, new_entries;
 
     WT_STAT_CONN_DATA_INCR(session, cache_eviction_split_leaf);
 
+    first = true;
+    ikey = NULL;
     page = ref->page;
     mod = page->modify;
     new_entries = mod->mod_multi_entries;
@@ -2075,14 +2091,21 @@ __split_multi(WT_SESSION_IMPL *session, WT_REF *ref, bool closing)
      * reference structures.
      */
     WT_RET(__wt_calloc_def(session, new_entries, &ref_new));
-    for (i = 0; i < new_entries; ++i)
-        WT_ERR(
-          __wt_multi_to_ref(session, page, &mod->mod_multi[i], &ref_new[i], &parent_incr, closing));
-
+    for (i = 0; i < new_entries; ++i) {
+        if (first) {
+            WT_ERR(
+              __wt_multi_to_ref(session, page, &mod->mod_multi[i], &ref_new[i], &parent_incr, closing, &ikey));
+            first = false;
+        } else {
+            WT_ERR(
+              __wt_multi_to_ref(session, page, &mod->mod_multi[i], &ref_new[i], &parent_incr, closing, NULL));
+        }
+    }
+    WT_CHECK_IKEY
     /*
      * Split into the parent; if we're closing the file, we hold it exclusively.
      */
-    WT_ERR(__split_parent(session, ref, ref_new, new_entries, parent_incr, closing, true));
+    WT_ERR(__split_parent(session, ref, ref_new, new_entries, parent_incr, closing, true, ikey));
 
     /*
      * The split succeeded, we can no longer fail.
@@ -2164,7 +2187,7 @@ __split_reverse(WT_SESSION_IMPL *session, WT_REF *ref)
 
     /* Lock the parent page, then proceed with the reverse split. */
     WT_RET(__split_internal_lock(session, ref, false, &parent));
-    ret = __split_parent(session, ref, NULL, 0, 0, false, true);
+    ret = __split_parent(session, ref, NULL, 0, 0, false, true, NULL);
     __split_internal_unlock(session, parent);
     return (ret);
 }
