@@ -1132,8 +1132,12 @@ __wt_rec_split_init(WT_SESSION_IMPL *session, WT_RECONCILE *r, WT_PAGE *page, ui
         ref = r->ref;
         if (__wt_ref_is_root(ref))
             WT_RET(__wt_buf_set(session, &chunk->key, "", 1));
-        else
+        else {
             __wt_ref_key(ref->home, ref, &chunk->key.data, &chunk->key.size);
+            if (((uint8_t *)chunk->key.data)[0] == 171) {
+                __wt_abort(session);
+            }
+        }
     } else
         chunk->recno = recno;
 
@@ -2087,9 +2091,12 @@ __rec_split_write(WT_SESSION_IMPL *session, WT_RECONCILE *r, WT_REC_CHUNK *chunk
     multi->supd_restore = false;
 
     /* Set the key. */
-    if (btree->type == BTREE_ROW)
+    if (btree->type == BTREE_ROW) {
         WT_RET(__wt_row_ikey_alloc(session, 0, chunk->key.data, chunk->key.size, &multi->key.ikey));
-    else
+        if (((uint8_t *)WT_IKEY_DATA(multi->key.ikey))[0] == 171) {
+             __wt_abort(session);
+        }
+    } else
         multi->key.recno = chunk->recno;
 
     /* Check if there are saved updates that might belong to this block. */
