@@ -2101,11 +2101,11 @@ __split_multi(WT_SESSION_IMPL *session, WT_REF *ref, bool closing)
               __wt_multi_to_ref(session, page, &mod->mod_multi[i], &ref_new[i], &parent_incr, closing, NULL));
         }
     }
-    WT_CHECK_IKEY
+    //WT_CHECK_IKEY
     /*
      * Split into the parent; if we're closing the file, we hold it exclusively.
      */
-    WT_ERR(__split_parent(session, ref, ref_new, new_entries, parent_incr, closing, true, ikey));
+    WT_ERR(__split_parent(session, ref, ref_new, new_entries, parent_incr, closing, true, NULL));//ikey));
 
     /*
      * The split succeeded, we can no longer fail.
