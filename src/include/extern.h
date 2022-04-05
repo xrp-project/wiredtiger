@@ -2369,3 +2369,4 @@ extern void __ut_block_off_srch(WT_EXT **head, wt_off_t off, WT_EXT ***stack, bo
 extern void __ut_block_size_srch(WT_SIZE **head, wt_off_t size, WT_SIZE ***stack);
 
 #endif
+static inline void __wt_rec_check_chunk(WT_SESSION_IMPL *session, WT_RECONCILE *r);
