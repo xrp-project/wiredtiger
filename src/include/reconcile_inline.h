@@ -377,6 +377,20 @@ __wt_rec_cell_build_val(WT_SESSION_IMPL *session, WT_RECONCILE *r, const void *d
     return (0);
 }
 
+static inline void
+__wt_rec_check_chunk(WT_SESSION_IMPL *session, WT_RECONCILE *r) {
+    if (r->cur_ptr != NULL) {
+        if (((uint8_t*)r->cur_ptr->key.data)[0] == 171) {
+            __wt_abort(session);
+        }
+    }
+    if (r->prev_ptr != NULL) {
+        if (((uint8_t*)r->prev_ptr->key.data)[0] == 171) {
+            __wt_abort(session);
+        }
+    }
+}
+
 /*
  * __wt_rec_dict_replace --
  *     Check for a dictionary match.

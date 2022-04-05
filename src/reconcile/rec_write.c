@@ -1187,6 +1187,7 @@ __wt_rec_split(WT_SESSION_IMPL *session, WT_RECONCILE *r, size_t next_len, bool 
     /* Set the entries, timestamps and size for the just finished chunk. */
     r->cur_ptr->entries = r->entries;
     r->cur_ptr->image.size = inuse;
+    __wt_rec_check_chunk(session, r);
 
     /*
      * Normally we keep two chunks in memory at a given time, and we write the previous chunk at
@@ -1283,6 +1284,7 @@ __wt_rec_split_crossing_bnd(WT_SESSION_IMPL *session, WT_RECONCILE *r, size_t ne
 
         return (0);
     }
+    __wt_rec_check_chunk(session, r);
 
     /* We are crossing a split boundary */
     return (__wt_rec_split(session, r, next_len, forced));

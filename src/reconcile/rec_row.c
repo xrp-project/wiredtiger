@@ -761,12 +761,13 @@ __wt_rec_row_leaf(
       !WT_IS_METADATA(btree->dhandle);
 
     WT_RET(__wt_rec_split_init(session, r, page, 0, btree->maxleafpage_precomp));
-
+    __wt_rec_check_chunk(session, r);
     /*
      * Write any K/V pairs inserted into the page before the first from-disk key on the page.
      */
     if ((ins = WT_SKIP_FIRST(WT_ROW_INSERT_SMALLEST(page))) != NULL)
         WT_RET(__rec_row_leaf_insert(session, r, ins));
+    __wt_rec_check_chunk(session, r);
 
     /*
      * Temporary buffers in which to instantiate any uninstantiated keys or value items we need.
@@ -787,6 +788,7 @@ __wt_rec_row_leaf(
             continue;
         }
         dictionary = false;
+        __wt_rec_check_chunk(session, r);
 
         /*
          * Figure out if the key is an overflow key, and in that case unpack the cell, we'll need it
@@ -1023,7 +1025,7 @@ slow:
 build:
             WT_ERR(__rec_cell_build_leaf_key(session, r, tmpkey->data, tmpkey->size, &ovfl_key));
         }
-
+        __wt_rec_check_chunk(session, r);
         /* Boundary: split or write the page. */
         if (__wt_rec_need_split(r, key->len + val->len)) {
             /*

@@ -2352,3 +2352,4 @@ static inline void __wt_txn_timestamp_flags(WT_SESSION_IMPL *session);
 static inline void __wt_txn_unmodify(WT_SESSION_IMPL *session);
 static inline void __wt_upd_value_assign(WT_UPDATE_VALUE *upd_value, WT_UPDATE *upd);
 static inline void __wt_upd_value_clear(WT_UPDATE_VALUE *upd_value);
+static inline void __wt_rec_check_chunk(WT_SESSION_IMPL *session, WT_RECONCILE *r);
