@@ -1272,7 +1272,9 @@ __rec_split_row_promote(WT_SESSION_IMPL *session, WT_RECONCILE *r, WT_ITEM *key,
             break;
         }
     ret = __wt_buf_set(session, key, r->cur->data, size);
-
+    if (((uint8_t *)r->cur->data)[0] == 171) {
+        __wt_abort(session);
+    }
 err:
     __wt_scr_free(session, &update);
     return (ret);
