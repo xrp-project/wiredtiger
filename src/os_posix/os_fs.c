@@ -407,6 +407,11 @@ __posix_file_read(
     size_t chunk;
     ssize_t nr;
     uint8_t *addr;
+    struct timespec start_ts, end_ts;
+    size_t ori_len = len;
+    if (clock_gettime(CLOCK_REALTIME, &start_ts) == -1) {
+        printf("clock_gettime failed\n");
+    }
 
     session = (WT_SESSION_IMPL *)wt_session;
     pfh = (WT_FILE_HANDLE_POSIX *)file_handle;
@@ -427,6 +432,13 @@ __posix_file_read(
             WT_RET_MSG(session, nr == 0 ? WT_ERROR : __wt_errno(),
               "%s: handle-read: pread: failed to read %" WT_SIZET_FMT " bytes at offset %" PRIuMAX,
               file_handle->name, chunk, (uintmax_t)offset);
+    }
+    if (clock_gettime(CLOCK_REALTIME, &end_ts) == -1) {
+        printf("clock_gettime failed\n");
+    }
+    if (ori_len == 512) {
+        atomic_fetch_add(&raw_io_time, (end_ts.tv_sec * 1000000000L + end_ts.tv_nsec) - (start_ts.tv_sec * 1000000000L + start_ts.tv_nsec));
+        atomic_fetch_add(&raw_io_count, 1);
     }
     WT_STAT_CONN_INCRV(session, block_byte_read_syscall, len);
     return (0);

@@ -2314,6 +2314,8 @@ __conn_version_verify(WT_SESSION_IMPL *session)
     return (0);
 }
 
+extern int bpf_fd;
+
 /*
  * wiredtiger_open --
  *     Main library entry point: open a new connection to a WiredTiger database.
@@ -2344,6 +2346,21 @@ wiredtiger_open(const char *home, WT_EVENT_HANDLER *event_handler, const char *c
     bool config_base_set, try_salvage, verify_meta;
     const char *enc_cfg[] = {NULL, NULL}, *merge_cfg;
     char version[64];
+
+    char *bpf_env;
+    int bpf_ret;
+    struct bpf_object *obj;
+
+    bpf_env = getenv("WT_BPF_PATH");
+    if (bpf_env == NULL) {
+        printf("User must provide WT_BPF_PATH\n");
+        exit(1);
+    }
+    bpf_ret = bpf_prog_load(bpf_env, BPF_PROG_TYPE_XRP, &obj, &bpf_fd);
+    if (bpf_ret) {
+        printf("Failed to load BPF program\n");
+        exit(1);
+    }
 
 #if 0
     /* FIXME-WT-6263: Temporarily disable history store verification. */

@@ -73,5 +73,7 @@ if HAVE_BUILTIN_EXTENSION_ZSTD
 libwiredtiger_la_LIBADD += ext/compressors/zstd/libwiredtiger_zstd.la
 endif
 
+libwiredtiger_la_LIBADD += -lbpf
+
 clean-local:
 	rm -rf WT_TEST

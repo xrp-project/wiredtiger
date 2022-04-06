@@ -250,6 +250,8 @@ extern int __wt_bm_preload(WT_BM *bm, WT_SESSION_IMPL *session, const uint8_t *a
   size_t addr_size) WT_GCC_FUNC_DECL_ATTRIBUTE((warn_unused_result));
 extern int __wt_bm_read(WT_BM *bm, WT_SESSION_IMPL *session, WT_ITEM *buf, const uint8_t *addr,
   size_t addr_size) WT_GCC_FUNC_DECL_ATTRIBUTE((warn_unused_result));
+extern int ___wt_bt_read(WT_SESSION_IMPL *session, WT_ITEM *buf, const uint8_t *addr,
+  size_t addr_size, uint8_t *ebpf_data) WT_GCC_FUNC_DECL_ATTRIBUTE((warn_unused_result));
 extern int __wt_bt_read(WT_SESSION_IMPL *session, WT_ITEM *buf, const uint8_t *addr,
   size_t addr_size) WT_GCC_FUNC_DECL_ATTRIBUTE((warn_unused_result));
 extern int __wt_bt_rebalance(WT_SESSION_IMPL *session, const char *cfg[])
@@ -1157,6 +1159,12 @@ extern int __wt_ovfl_track_wrapup_err(WT_SESSION_IMPL *session, WT_PAGE *page)
   WT_GCC_FUNC_DECL_ATTRIBUTE((warn_unused_result));
 extern int __wt_page_alloc(WT_SESSION_IMPL *session, uint8_t type, uint32_t alloc_entries,
   bool alloc_refs, WT_PAGE **pagep) WT_GCC_FUNC_DECL_ATTRIBUTE((warn_unused_result));
+extern int ___wt_page_in_func(WT_SESSION_IMPL *session, WT_REF *ref, uint32_t flags, uint8_t *ebpf_data
+#ifdef HAVE_DIAGNOSTIC
+  ,
+  const char *func, int line
+#endif
+  ) WT_GCC_FUNC_DECL_ATTRIBUTE((warn_unused_result));
 extern int __wt_page_in_func(WT_SESSION_IMPL *session, WT_REF *ref, uint32_t flags
 #ifdef HAVE_DIAGNOSTIC
   ,

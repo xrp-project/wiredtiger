@@ -19,6 +19,10 @@ extern "C" {
 #include "wiredtiger_config.h"
 #include "wiredtiger_ext.h"
 
+#include <linux/bpf.h>
+#include <bpf/bpf.h>
+#include <bpf/libbpf.h>
+
 /*******************************************
  * WiredTiger system include files.
  *******************************************/
@@ -447,6 +451,32 @@ typedef uint64_t wt_timestamp_t;
 #include "reconcile.i"
 #include "serial.i"
 #include "time.i"
+
+#include "ebpf.h"
+
+#include <stdatomic.h>
+#include <time.h>
+
+extern atomic_long clsm_search_time;
+extern atomic_long clsm_search_count;
+
+extern atomic_long btcur_search_time;
+extern atomic_long btcur_search_count;
+
+extern atomic_long row_search_time;
+extern atomic_long row_search_count;
+
+extern atomic_long page_in_time;
+extern atomic_long page_in_count;
+
+extern atomic_long bpf_io_time;
+extern atomic_long bpf_io_count;
+
+extern atomic_long raw_io_time;
+extern atomic_long raw_io_count;
+
+extern atomic_long cache_eviction_time;
+extern atomic_long cache_eviction_count;
 
 #if defined(__cplusplus)
 }

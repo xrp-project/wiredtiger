@@ -223,12 +223,23 @@ __wt_row_search(WT_CURSOR_BTREE *cbt, WT_ITEM *srch_key, bool insert, WT_REF *le
     uint32_t base, indx, limit, read_flags;
     int cmp, depth;
     bool append_check, descend_right, done;
+    int ebpf_ret;
+    uint64_t ebpf_offset, ebpf_size;
+    int ebpf_nr_page, ebpf_i;
+    uint64_t ebpf_child_index_arr[EBPF_MAX_DEPTH];
+    uint8_t *ebpf_page_arr;
+    struct timespec start_ts, end_ts;
+    if (clock_gettime(CLOCK_REALTIME, &start_ts) == -1) {
+        printf("clock_gettime failed\n");
+    }
 
     session = CUR2S(cbt);
     btree = S2BT(session);
     collator = btree->collator;
     item = cbt->tmp;
     current = NULL;
+
+    ebpf_nr_page = 0;
 
     /*
      * Assert the session and cursor have the right relationship (not search specific, but search is
@@ -328,6 +339,13 @@ restart:
          *
          * Reference the comment above about the 0th key: we continue to special-case it.
          */
+        if (ebpf_nr_page > 0) {
+            indx = ebpf_child_index_arr[ebpf_i];
+            descent = pindex->index[indx];
+            ++ebpf_i;
+            --ebpf_nr_page;
+            goto descend;
+        }
         base = 1;
         limit = pindex->entries - 1;
         if (collator == NULL && srch_key->size <= WT_COMPARE_SHORT_MAXLEN)
@@ -425,7 +443,58 @@ descend:
         read_flags = WT_READ_RESTART_OK;
         if (F_ISSET(cbt, WT_CBT_READ_ONCE))
             FLD_SET(read_flags, WT_READ_WONT_NEED);
-        if ((ret = __wt_page_swap(session, current, descent, read_flags)) == 0) {
+
+        /*
+         * check if the descent is in memory.
+         * if not, trigger ebpf traversal
+         */
+        if (F_ISSET(cbt, WT_CBT_EBPF) && ebpf_nr_page == 0) {
+            if (descent->state == WT_REF_DISK
+                && ebpf_get_cell_type(descent->addr) == WT_CELL_ADDR_INT) {
+                /* parse wt cell to get file offset & size */
+                ebpf_ret = ebpf_parse_cell_addr((uint8_t **)&descent->addr, &ebpf_offset, &ebpf_size, false);
+                if (ebpf_ret < 0 || ebpf_size != EBPF_BLOCK_SIZE) {
+                    __wt_verbose(session, WT_VERB_LSM, "ebpf_parse_cell_addr_int error - uri: %s, depth: %d, ret: %d, size: %ld", 
+                                 cbt->dhandle->name, depth, ebpf_ret, ebpf_size);
+                    F_CLR(cbt, WT_CBT_EBPF);
+                    F_SET(cbt, WT_CBT_EBPF_ERROR);
+                    ebpf_nr_page = 0;
+                    goto skip_ebpf;
+                }
+                /*
+                 * start ebpf traversal
+                 */
+                ebpf_ret = 
+                    ebpf_lookup(((WT_FILE_HANDLE_POSIX *)btree->bm->block->fh->handle)->fd, 
+                                ebpf_offset, (uint8_t *)srch_key->data, srch_key->size, 
+                                cbt->ebpf_data_buffer, cbt->ebpf_scratch_buffer,
+                                &ebpf_page_arr, ebpf_child_index_arr, &ebpf_nr_page);
+                if (ebpf_ret < 0) {
+                    __wt_verbose(session, WT_VERB_LSM, "ebpf_lookup error - uri: %s, depth: %d, ret: %d", 
+                                 cbt->dhandle->name, depth, ebpf_ret);
+                    F_CLR(cbt, WT_CBT_EBPF);
+                    F_SET(cbt, WT_CBT_EBPF_ERROR);
+                    ebpf_nr_page = 0;
+                    goto skip_ebpf;
+                } else {
+                    ebpf_i = 0;
+                }
+            }
+        }
+skip_ebpf:
+        if (ebpf_nr_page == 0) {
+            ret = __wt_page_swap(session, current, descent, read_flags);
+        } else {
+            ret = ___wt_page_swap_func(session, current, descent, read_flags, &ebpf_page_arr[EBPF_BLOCK_SIZE * ebpf_i]);
+            if (ret != 0) {
+                printf("__wt_row_search: ___wt_page_swap_func failed\n");
+                F_CLR(cbt, WT_CBT_EBPF);
+                F_SET(cbt, WT_CBT_EBPF_ERROR);
+                ebpf_nr_page = 0;
+                goto skip_ebpf;
+            }
+        }
+        if (ret == 0) {
             current = descent;
             continue;
         }
@@ -549,6 +618,11 @@ leaf_only:
 leaf_match:
         cbt->compare = 0;
         cbt->slot = WT_ROW_SLOT(page, rip);
+        if (clock_gettime(CLOCK_REALTIME, &end_ts) == -1) {
+            printf("clock_gettime failed\n");
+        }
+        atomic_fetch_add(&row_search_time, (end_ts.tv_sec * 1000000000L + end_ts.tv_nsec) - (start_ts.tv_sec * 1000000000L + start_ts.tv_nsec));
+        atomic_fetch_add(&row_search_count, 1);
         return (0);
     }
 

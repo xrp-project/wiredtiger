@@ -52,6 +52,9 @@ struct __wt_cursor_lsm {
     WT_CURSOR iface;
 
     WT_LSM_TREE *lsm_tree;
+    uint8_t *ebpf_data_buffer;
+    uint8_t *ebpf_scratch_buffer;
+
     uint64_t dsk_gen;
 
     u_int nchunks;               /* Number of chunks in the cursor */
@@ -76,6 +79,8 @@ struct __wt_cursor_lsm {
 #define WT_CLSM_MULTIPLE 0x040u      /* Multiple cursors have values */
 #define WT_CLSM_OPEN_READ 0x080u     /* Open for reads */
 #define WT_CLSM_OPEN_SNAPSHOT 0x100u /* Open for snapshot isolation */
+#define WT_CLSM_EBPF 0x200u          /* Ebpf enabled */
+#define WT_CLSM_EBPF_SUCCESS 0x400u  /* Ebpf succeed */
                                      /* AUTOMATIC FLAG VALUE GENERATION STOP */
     uint32_t flags;
 };

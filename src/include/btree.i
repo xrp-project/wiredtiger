@@ -1713,7 +1713,7 @@ __wt_split_descent_race(WT_SESSION_IMPL *session, WT_REF *ref, WT_PAGE_INDEX *sa
  *     Swap one page's hazard pointer for another one when hazard pointer coupling up/down the tree.
  */
 static inline int
-__wt_page_swap_func(WT_SESSION_IMPL *session, WT_REF *held, WT_REF *want, uint32_t flags
+___wt_page_swap_func(WT_SESSION_IMPL *session, WT_REF *held, WT_REF *want, uint32_t flags, uint8_t *ebpf_data
 #ifdef HAVE_DIAGNOSTIC
   ,
   const char *func, int line
@@ -1737,7 +1737,7 @@ __wt_page_swap_func(WT_SESSION_IMPL *session, WT_REF *held, WT_REF *want, uint32
         return (0);
 
     /* Get the wanted page. */
-    ret = __wt_page_in_func(session, want, flags
+    ret = ___wt_page_in_func(session, want, flags, ebpf_data
 #ifdef HAVE_DIAGNOSTIC
       ,
       func, line
@@ -1779,6 +1779,22 @@ __wt_page_swap_func(WT_SESSION_IMPL *session, WT_REF *held, WT_REF *want, uint32
         WT_RET_MSG(session, EINVAL, "page-release WT_RESTART error mapped to EINVAL");
 
     return (ret);
+}
+
+static inline int
+__wt_page_swap_func(WT_SESSION_IMPL *session, WT_REF *held, WT_REF *want, uint32_t flags
+#ifdef HAVE_DIAGNOSTIC
+  ,
+  const char *func, int line
+#endif
+  )
+{
+    return ___wt_page_swap_func(session, held, want, flags, NULL
+#ifdef HAVE_DIAGNOSTIC
+  ,
+  func, line
+#endif
+    );
 }
 
 /*

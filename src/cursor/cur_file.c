@@ -660,6 +660,9 @@ __curfile_create(WT_SESSION_IMPL *session, WT_CURSOR *owner, const char *cfg[], 
     cursor->value_format = btree->value_format;
     cbt->dhandle = session->dhandle;
 
+    cbt->ebpf_data_buffer = NULL;
+    cbt->ebpf_scratch_buffer = NULL;
+
     /*
      * Increment the data-source's in-use counter; done now because closing the cursor will
      * decrement it, and all failure paths from here close the cursor.

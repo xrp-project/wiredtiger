@@ -85,7 +85,7 @@ __evict_force_check(WT_SESSION_IMPL *session, WT_REF *ref)
  *     Read a page from the file.
  */
 static int
-__page_read(WT_SESSION_IMPL *session, WT_REF *ref, uint32_t flags)
+___page_read(WT_SESSION_IMPL *session, WT_REF *ref, uint32_t flags, uint8_t *ebpf_data)
 {
     WT_ADDR_COPY addr;
     WT_DECL_RET;
@@ -95,6 +95,10 @@ __page_read(WT_SESSION_IMPL *session, WT_REF *ref, uint32_t flags)
     uint32_t page_flags;
     uint8_t previous_state;
     bool timer;
+    struct timespec start_ts, end_ts;
+    if (clock_gettime(CLOCK_REALTIME, &start_ts) == -1) {
+        printf("clock_gettime failed\n");
+    }
 
     time_start = time_stop = 0;
 
@@ -138,7 +142,7 @@ __page_read(WT_SESSION_IMPL *session, WT_REF *ref, uint32_t flags)
     timer = !F_ISSET(session, WT_SESSION_INTERNAL);
     if (timer)
         time_start = __wt_clock(session);
-    WT_ERR(__wt_bt_read(session, &tmp, addr.addr, addr.size));
+    WT_ERR(___wt_bt_read(session, &tmp, addr.addr, addr.size, ebpf_data));
     if (timer) {
         time_stop = __wt_clock(session);
         time_diff = WT_CLOCKDIFF_US(time_stop, time_start);
@@ -164,6 +168,12 @@ __page_read(WT_SESSION_IMPL *session, WT_REF *ref, uint32_t flags)
     F_CLR(session, WT_SESSION_INSTANTIATE_PREPARE);
     WT_ERR(ret);
     tmp.mem = NULL;
+
+    if (clock_gettime(CLOCK_REALTIME, &end_ts) == -1) {
+        printf("clock_gettime failed\n");
+    }
+    atomic_fetch_add(&page_in_time, (end_ts.tv_sec * 1000000000L + end_ts.tv_nsec) - (start_ts.tv_sec * 1000000000L + start_ts.tv_nsec));
+    atomic_fetch_add(&page_in_count, 1);
 
 skip_read:
     switch (previous_state) {
@@ -195,13 +205,19 @@ err:
     return (ret);
 }
 
+static int
+__page_read(WT_SESSION_IMPL *session, WT_REF *ref, uint32_t flags)
+{
+    return ___page_read(session, ref, flags, NULL);
+}
+
 /*
  * __wt_page_in_func --
  *     Acquire a hazard pointer to a page; if the page is not in-memory, read it from the disk and
  *     build an in-memory version.
  */
 int
-__wt_page_in_func(WT_SESSION_IMPL *session, WT_REF *ref, uint32_t flags
+___wt_page_in_func(WT_SESSION_IMPL *session, WT_REF *ref, uint32_t flags, uint8_t *ebpf_data
 #ifdef HAVE_DIAGNOSTIC
   ,
   const char *func, int line
@@ -215,6 +231,7 @@ __wt_page_in_func(WT_SESSION_IMPL *session, WT_REF *ref, uint32_t flags
     uint8_t current_state;
     int force_attempts;
     bool busy, cache_work, evict_skip, stalled, wont_need;
+    struct timespec start_ts, end_ts;
 
     btree = S2BT(session);
 
@@ -254,10 +271,18 @@ read:
              * The page isn't in memory, read it. If this thread respects the cache size, check for
              * space in the cache.
              */
+            if (clock_gettime(CLOCK_REALTIME, &start_ts) == -1) {
+                printf("clock_gettime failed\n");
+            }
             if (!LF_ISSET(WT_READ_IGNORE_CACHE_SIZE))
                 WT_RET(__wt_cache_eviction_check(
                   session, true, !F_ISSET(session->txn, WT_TXN_HAS_ID), NULL));
-            WT_RET(__page_read(session, ref, flags));
+            if (clock_gettime(CLOCK_REALTIME, &end_ts) == -1) {
+       	        printf("clock_gettime failed\n");
+       	    }
+            atomic_fetch_add(&cache_eviction_time, (end_ts.tv_sec * 1000000000L + end_ts.tv_nsec) - (start_ts.tv_sec * 1000000000L + start_ts.tv_nsec));
+            atomic_fetch_add(&cache_eviction_count, 1);
+            WT_RET(___page_read(session, ref, flags, ebpf_data));
 
             /* We just read a page, don't evict it before we have a chance to use it. */
             evict_skip = true;
@@ -429,4 +454,20 @@ skip_evict:
         __wt_spin_backoff(&yield_cnt, &sleep_usecs);
         WT_STAT_CONN_INCRV(session, page_sleep, sleep_usecs);
     }
+}
+
+int
+__wt_page_in_func(WT_SESSION_IMPL *session, WT_REF *ref, uint32_t flags
+#ifdef HAVE_DIAGNOSTIC
+  ,
+  const char *func, int line
+#endif
+  )
+{
+    return ___wt_page_in_func(session, ref, flags, NULL
+#ifdef HAVE_DIAGNOSTIC
+    ,
+    func, line
+#endif
+    );
 }

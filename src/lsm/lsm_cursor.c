@@ -1145,6 +1145,8 @@ __clsm_lookup(WT_CURSOR_LSM *clsm, WT_ITEM *value)
     WT_SESSION_IMPL *session;
     u_int i;
     bool have_hash;
+    WT_CURSOR_BTREE *cbt;
+    bool immutable = false;
 
     c = NULL;
     cursor = &clsm->iface;
@@ -1169,14 +1171,37 @@ __clsm_lookup(WT_CURSOR_LSM *clsm, WT_ITEM *value)
             if (ret == 0)
                 WT_LSM_TREE_STAT_INCR(session, clsm->lsm_tree->bloom_hit);
         }
+
+        if (!immutable
+            && __wt_txn_visible(session, clsm->chunks[i]->switch_txn, WT_TS_NONE)) {
+            immutable = true;
+        }
+
+        /* 
+         * enable ebpf only on read-only chunk
+         */
+        cbt = (WT_CURSOR_BTREE *)c;
+        F_CLR(cbt, WT_CBT_EBPF | WT_CBT_EBPF_SUCCESS | WT_CBT_EBPF_ERROR);
+        if (F_ISSET(clsm, WT_CLSM_EBPF) && immutable) {
+            F_SET(cbt, WT_CBT_EBPF);  /* only cursor with WT_CBT_EBPF can perform ebpf traversal */
+            cbt->ebpf_data_buffer = clsm->ebpf_data_buffer;
+            cbt->ebpf_scratch_buffer = clsm->ebpf_scratch_buffer;
+        }
+
         c->set_key(c, &cursor->key);
         if ((ret = c->search(c)) == 0) {
+            cbt->ebpf_data_buffer = NULL;
+            cbt->ebpf_scratch_buffer = NULL;
             WT_ERR(c->get_key(c, &cursor->key));
             WT_ERR(c->get_value(c, value));
             if (__clsm_deleted(clsm, value))
                 ret = WT_NOTFOUND;
+            F_CLR(cbt, WT_CBT_EBPF | WT_CBT_EBPF_SUCCESS | WT_CBT_EBPF_ERROR);
             goto done;
         }
+        cbt->ebpf_data_buffer = NULL;
+        cbt->ebpf_scratch_buffer = NULL;
+        F_CLR(cbt, WT_CBT_EBPF | WT_CBT_EBPF_SUCCESS | WT_CBT_EBPF_ERROR);
         WT_ERR_NOTFOUND_OK(ret, false);
         F_CLR(c, WT_CURSTD_KEY_SET);
         /* Update stats: the active chunk can't have a bloom filter. */
@@ -1201,6 +1226,27 @@ err:
     return (ret);
 }
 
+atomic_long clsm_search_time;
+atomic_long clsm_search_count;
+
+atomic_long btcur_search_time;
+atomic_long btcur_search_count;
+
+atomic_long row_search_time;
+atomic_long row_search_count;
+
+atomic_long page_in_time;
+atomic_long page_in_count;
+
+atomic_long bpf_io_time;
+atomic_long bpf_io_count;
+
+atomic_long raw_io_time;
+atomic_long raw_io_count;
+
+atomic_long cache_eviction_time;
+atomic_long cache_eviction_count;
+
 /*
  * __clsm_search --
  *     WT_CURSOR->search method for the LSM cursor type.
@@ -1211,6 +1257,10 @@ __clsm_search(WT_CURSOR *cursor)
     WT_CURSOR_LSM *clsm;
     WT_DECL_RET;
     WT_SESSION_IMPL *session;
+    struct timespec start_ts, end_ts;
+    if (clock_gettime(CLOCK_REALTIME, &start_ts) == -1) {
+        printf("clock_gettime failed\n");
+    }
 
     clsm = (WT_CURSOR_LSM *)cursor;
 
@@ -1220,12 +1270,20 @@ __clsm_search(WT_CURSOR *cursor)
     WT_ERR(__clsm_enter(clsm, true, false));
     F_CLR(clsm, WT_CLSM_ITERATE_NEXT | WT_CLSM_ITERATE_PREV);
 
+    F_CLR(clsm, WT_CLSM_EBPF_SUCCESS | WT_CLSM_EBPF);
+    F_SET(clsm, WT_CLSM_EBPF);
     ret = __clsm_lookup(clsm, &cursor->value);
 
 err:
     __clsm_leave(clsm);
     if (ret == 0)
         __clsm_deleted_decode(clsm, &cursor->value);
+    F_CLR(clsm, WT_CLSM_EBPF | WT_CLSM_EBPF_SUCCESS);
+    if (clock_gettime(CLOCK_REALTIME, &end_ts) == -1) {
+        printf("clock_gettime failed\n");
+    }
+    atomic_fetch_add(&clsm_search_time, (end_ts.tv_sec * 1000000000L + end_ts.tv_nsec) - (start_ts.tv_sec * 1000000000L + start_ts.tv_nsec));
+    atomic_fetch_add(&clsm_search_count, 1);
     API_END_RET(session, ret);
 }
 
@@ -1643,6 +1701,10 @@ __wt_clsm_close(WT_CURSOR *cursor)
      * never have been used.
      */
     clsm = (WT_CURSOR_LSM *)cursor;
+    if (clsm->ebpf_data_buffer != NULL)
+        free(clsm->ebpf_data_buffer);
+    if (clsm->ebpf_scratch_buffer != NULL)
+        free(clsm->ebpf_scratch_buffer);
     CURSOR_API_CALL_PREPARE_ALLOWED(cursor, session, close, NULL);
 err:
 
@@ -1735,6 +1797,9 @@ __wt_clsm_open(WT_SESSION_IMPL *session, const char *uri, WT_CURSOR *owner, cons
     cursor->key_format = lsm_tree->key_format;
     cursor->value_format = lsm_tree->value_format;
 
+    clsm->ebpf_data_buffer = NULL;
+    clsm->ebpf_scratch_buffer = NULL;
+
     clsm->lsm_tree = lsm_tree;
     lsm_tree = NULL;
 
@@ -1755,6 +1820,19 @@ __wt_clsm_open(WT_SESSION_IMPL *session, const char *uri, WT_CURSOR *owner, cons
 
     if (bulk)
         WT_ERR(__wt_clsm_open_bulk(clsm, cfg));
+
+    clsm->ebpf_data_buffer = aligned_alloc(EBPF_DATA_BUFFER_SIZE, EBPF_DATA_BUFFER_SIZE);
+    if (!clsm->ebpf_data_buffer) {
+        printf("failed to allocate ebpf_data_buffer for lsm cursor\n");
+        goto err;
+    }
+    clsm->ebpf_scratch_buffer = aligned_alloc(EBPF_SCRATCH_BUFFER_SIZE, EBPF_SCRATCH_BUFFER_SIZE);
+    if (!clsm->ebpf_scratch_buffer) {
+        printf("failed to allocate ebpf_scratch_buffer for lsm cursor\n");
+        goto err;
+    }
+    memset(clsm->ebpf_data_buffer, 0, EBPF_DATA_BUFFER_SIZE);
+    memset(clsm->ebpf_scratch_buffer, 0, EBPF_SCRATCH_BUFFER_SIZE);
 
     if (0) {
 err:

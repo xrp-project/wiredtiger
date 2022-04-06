@@ -501,6 +501,10 @@ __wt_btcur_search(WT_CURSOR_BTREE *cbt)
     WT_DECL_RET;
     WT_SESSION_IMPL *session;
     bool leaf_found, valid;
+    struct timespec start_ts, end_ts;
+    if (clock_gettime(CLOCK_REALTIME, &start_ts) == -1) {
+        printf("clock_gettime failed\n");
+    }
 
     btree = CUR2BT(cbt);
     cursor = &cbt->iface;
@@ -580,6 +584,11 @@ err:
         WT_TRET(__cursor_reset(cbt));
         __cursor_state_restore(cursor, &state);
     }
+    if (clock_gettime(CLOCK_REALTIME, &end_ts) == -1) {
+        printf("clock_gettime failed\n");
+    }
+    atomic_fetch_add(&btcur_search_time, (end_ts.tv_sec * 1000000000L + end_ts.tv_nsec) - (start_ts.tv_sec * 1000000000L + start_ts.tv_nsec));
+    atomic_fetch_add(&btcur_search_count, 1);
     return (ret);
 }
 

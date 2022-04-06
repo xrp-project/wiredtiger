@@ -13,7 +13,7 @@
  *     Read a cookie referenced block into a buffer.
  */
 int
-__wt_bt_read(WT_SESSION_IMPL *session, WT_ITEM *buf, const uint8_t *addr, size_t addr_size)
+___wt_bt_read(WT_SESSION_IMPL *session, WT_ITEM *buf, const uint8_t *addr, size_t addr_size, uint8_t *ebpf_data)
 {
     WT_BM *bm;
     WT_BTREE *btree;
@@ -35,7 +35,12 @@ __wt_bt_read(WT_SESSION_IMPL *session, WT_ITEM *buf, const uint8_t *addr, size_t
      * into the caller's buffer. Else, read directly into the caller's buffer.
      */
     if (btree->compressor == NULL && btree->kencryptor == NULL) {
-        WT_RET(bm->read(bm, session, buf, addr, addr_size));
+        if (ebpf_data == NULL) {
+            WT_RET(bm->read(bm, session, buf, addr, addr_size));
+        } else {
+            WT_RET(__wt_buf_initsize(session, buf, EBPF_BLOCK_SIZE));
+            memcpy(buf->data, ebpf_data, EBPF_BLOCK_SIZE);
+        }
         dsk = buf->data;
         ip = NULL;
     } else {
@@ -148,6 +153,12 @@ err:
     __wt_scr_free(session, &tmp);
     __wt_scr_free(session, &etmp);
     return (ret);
+}
+
+int
+__wt_bt_read(WT_SESSION_IMPL *session, WT_ITEM *buf, const uint8_t *addr, size_t addr_size)
+{
+    return ___wt_bt_read(session, buf, addr, addr_size, NULL);
 }
 
 /*
