@@ -1398,6 +1398,7 @@ __wt_rec_split(WT_SESSION_IMPL *session, WT_RECONCILE *r, size_t next_len)
     if (r->salvage != NULL)
         WT_RET_PANIC(session, WT_PANIC, "%s page too large, attempted split during salvage",
           __wt_page_type_string(r->page->type));
+    __wt_rec_check_chunk(session, r);
 
     /*
      * We can get here if the first key/value pair won't fit. Grow the buffer to contain the current
@@ -1414,12 +1415,14 @@ __wt_rec_split(WT_SESSION_IMPL *session, WT_RECONCILE *r, size_t next_len)
         WT_ASSERT(session, r->page->type != WT_PAGE_COL_FIX);
         goto done;
     }
+    __wt_rec_check_chunk(session, r);
 
     if (r->page->type == WT_PAGE_ROW_INT && r->entries < WT_PAGE_INTL_MINIMUM_ENTRIES)
         goto done;
 
     /* All page boundaries reset the dictionary. */
     __wt_rec_dictionary_reset(r);
+    __wt_rec_check_chunk(session, r);
 
     /* Set the entries, timestamps and size for the just finished chunk. */
     r->cur_ptr->entries = r->entries;
@@ -1489,6 +1492,7 @@ __wt_rec_split(WT_SESSION_IMPL *session, WT_RECONCILE *r, size_t next_len)
         r->aux_space_avail = r->page_size - btree->maxleafpage - WT_COL_FIX_AUXHEADER_RESERVATION;
     } else
         r->min_space_avail = r->min_split_size - WT_PAGE_HEADER_BYTE_SIZE(btree);
+    __wt_rec_check_chunk(session, r);
 
 done:
     /*
