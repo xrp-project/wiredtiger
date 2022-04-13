@@ -1247,6 +1247,8 @@ atomic_long raw_io_count;
 atomic_long cache_eviction_time;
 atomic_long cache_eviction_count;
 
+extern int bpf_fd;
+
 /*
  * __clsm_search --
  *     WT_CURSOR->search method for the LSM cursor type.
@@ -1271,7 +1273,9 @@ __clsm_search(WT_CURSOR *cursor)
     F_CLR(clsm, WT_CLSM_ITERATE_NEXT | WT_CLSM_ITERATE_PREV);
 
     F_CLR(clsm, WT_CLSM_EBPF_SUCCESS | WT_CLSM_EBPF);
-    F_SET(clsm, WT_CLSM_EBPF);
+    if (bpf_fd != -1) {
+        F_SET(clsm, WT_CLSM_EBPF);
+    }
     ret = __clsm_lookup(clsm, &cursor->value);
 
 err:
