@@ -152,6 +152,10 @@ __clsm_enter_update(WT_CURSOR_LSM *clsm)
 static inline int
 __clsm_enter(WT_CURSOR_LSM *clsm, bool reset, bool update)
 {
+    // In search:
+    // - reset=true
+    // - update=false
+
     WT_DECL_RET;
     WT_LSM_TREE *lsm_tree;
     WT_SESSION_IMPL *session;
@@ -1171,6 +1175,8 @@ __clsm_lookup(WT_CURSOR_LSM *clsm, WT_ITEM *value)
         }
         c->set_key(c, &cursor->key);
         if ((ret = c->search(c)) == 0) {
+            // Fill buffer with the result!
+            // We saw the result was stored in cbt->slot.
             WT_ERR(c->get_key(c, &cursor->key));
             WT_ERR(c->get_value(c, value));
             if (__clsm_deleted(clsm, value))
@@ -1224,6 +1230,7 @@ __clsm_search(WT_CURSOR *cursor)
 
 err:
     __clsm_leave(clsm);
+    // We don't care about this, only relevant in merge and bloom filter.
     if (ret == 0)
         __clsm_deleted_decode(clsm, &cursor->value);
     API_END_RET(session, ret);

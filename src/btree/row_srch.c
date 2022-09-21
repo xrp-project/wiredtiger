@@ -289,6 +289,7 @@ restart:
     for (depth = 2, pindex = NULL;; ++depth) {
         parent_pindex = pindex;
         page = current->page;
+        // We reached a leaf page!
         if (page->type != WT_PAGE_ROW_INT)
             break;
 
@@ -344,6 +345,8 @@ restart:
                     goto descend;
             }
         else if (collator == NULL) {
+            // THIS IS THE ONE WE CARE ABOUT!
+
             /*
              * Reset the skipped prefix counts; we'd normally expect the parent's skipped prefix
              * values to be larger than the child's values and so we'd only increase them as we walk
@@ -434,7 +437,10 @@ descend:
         return (ret);
     }
 
+    // TREE DESCENT END
+
     /* Track how deep the tree gets. */
+    // TODO: Why is this here???
     if (depth > btree->maximum_depth)
         btree->maximum_depth = depth;
 
