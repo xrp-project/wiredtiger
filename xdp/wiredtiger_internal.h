@@ -283,18 +283,25 @@ typedef union __wt_rand_state WT_RAND_STATE;
 typedef uint64_t wt_timestamp_t;
 
 #include "wiredtiger.h"
-#include "misc.h"
+#include "wiredtiger_ext.h"
+
+// Order from wt_internal.h
+#include "gcc.h"
+#include "hardware.h"
 #include "queue.h"
-#include "stat.h"
+#include "misc.h"
 #include "mutex.h"
+#include "stat.h"
 #include "dhandle.h"
+#include "timestamp.h"
 #include "bloom.h"
-#include "compact.h" // required by session.h
 #include "btmem.h"
-#include "log.h"
-#include "txn.h"
+#include "compact.h" // required by session.h
 #include "cursor.h"
-#include "session.h"
+#include "log.h"
 #include "lsm.h"
+#include "txn.h"
+#include "session.h"
+
 
 #endif // __WT_INTERNAL_H

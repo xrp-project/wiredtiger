@@ -1,5 +1,5 @@
 GCC = gcc
-CFLAGS = -Og -g
+CFLAGS = -Og -g -Wall
 
 main.out: main.o
 	$(GCC) -o main.out main.o -lpthread -lwiredtiger

@@ -74,4 +74,4 @@ struct wt_cond_t_stub {
 
 typedef struct __wt_spinlock_stub WT_SPINLOCK;
 typedef struct __wt_mutex_stub wt_mutex_t;
-typedef wt_cond_t_stub wt_cond_t;
+typedef struct wt_cond_t_stub wt_cond_t;
