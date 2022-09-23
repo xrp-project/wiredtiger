@@ -247,8 +247,8 @@ struct __wt_session_stats;
 typedef struct __wt_session_stats WT_SESSION_STATS;
 struct __wt_size;
 typedef struct __wt_size WT_SIZE;
-struct __wt_spinlock;
-typedef struct __wt_spinlock WT_SPINLOCK;
+// struct __wt_spinlock;
+// typedef struct __wt_spinlock WT_SPINLOCK;
 struct __wt_stash;
 typedef struct __wt_stash WT_STASH;
 struct __wt_table;
@@ -282,12 +282,18 @@ typedef union __wt_rand_state WT_RAND_STATE;
 
 typedef uint64_t wt_timestamp_t;
 
-#include <wiredtiger.h>
+#include "wiredtiger.h"
+#include "misc.h"
+#include "queue.h"
 #include "stat.h"
 #include "mutex.h"
 #include "dhandle.h"
 #include "bloom.h"
-#include "queue.h"
+#include "compact.h" // required by session.h
+#include "btmem.h"
+#include "log.h"
+#include "txn.h"
+#include "cursor.h"
 #include "session.h"
 #include "lsm.h"
 
