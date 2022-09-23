@@ -8,7 +8,13 @@ main.o: main.c
 	$(GCC) $(CFLAGS) -c main.c -o main.o -lpthread -lwiredtiger
 
 test_wiredtiger_internal:
-	$(GCC) $(CFLAGS) wiredtiger_internal_test.c
+	$(GCC) $(CFLAGS) -o wiredtiger_internal_test.out wiredtiger_internal_test.c
+
+print_wt_struct_sizes:
+	$(GCC) $(CFLAGS) -o print_wt_struct_sizes.out print_wt_struct_sizes.c -lwiredtiger
+
+print_wt_bpf_struct_sizes:
+	$(GCC) $(CFLAGS) -o print_wt_bpf_struct_sizes.out print_wt_bpf_struct_sizes.c
 
 clean:
 	rm *.o *.out

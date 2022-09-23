@@ -56,9 +56,9 @@ struct timespec
 // Concurrency //
 /////////////////
 
-#define WT_SPINLOCK_SIZE 1 // TODO: Find out sizes!
-#define WT_MUTEX_SIZE 1
-#define WT_COND_T_SIZE 1
+#define WT_SPINLOCK_SIZE 64 // TODO: Find out sizes!
+#define WT_MUTEX_SIZE 40
+#define WT_COND_T_SIZE 48
 
 struct __wt_spinlock_stub {
     uint8_t stub[WT_SPINLOCK_SIZE];

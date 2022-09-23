@@ -96,33 +96,34 @@ struct __wt_rwlock { /* Read/write lock */
 #define SPINLOCK_PTHREAD_MUTEX 2
 #define SPINLOCK_PTHREAD_MUTEX_ADAPTIVE 3
 
-struct __wt_spinlock {
-#if SPINLOCK_TYPE == SPINLOCK_GCC
-    WT_CACHE_LINE_PAD_BEGIN
-    volatile bool lock;
-    uint8_t unused[7];
-#elif SPINLOCK_TYPE == SPINLOCK_PTHREAD_MUTEX || \
-  SPINLOCK_TYPE == SPINLOCK_PTHREAD_MUTEX_ADAPTIVE || SPINLOCK_TYPE == SPINLOCK_MSVC
-    wt_mutex_t lock;
-#else
-#error Unknown spinlock type
-#endif
 
-    const char *name; /* Mutex name */
+// struct __wt_spinlock {
+// #if SPINLOCK_TYPE == SPINLOCK_GCC
+//     WT_CACHE_LINE_PAD_BEGIN
+//     volatile bool lock;
+//     uint8_t unused[7];
+// #elif SPINLOCK_TYPE == SPINLOCK_PTHREAD_MUTEX || \
+//   SPINLOCK_TYPE == SPINLOCK_PTHREAD_MUTEX_ADAPTIVE || SPINLOCK_TYPE == SPINLOCK_MSVC
+//     wt_mutex_t lock;
+// #else
+// #error Unknown spinlock type
+// #endif
 
-    /*
-     * We track acquisitions and time spent waiting for some locks. For performance reasons and to
-     * make it possible to write generic code that tracks statistics for different locks, we store
-     * the offset of the statistics fields to be updated during lock acquisition.
-     */
-    int16_t stat_count_off;         /* acquisitions offset */
-    int16_t stat_app_usecs_off;     /* waiting application threads offset */
-    int16_t stat_int_usecs_off;     /* waiting server threads offset */
-    int16_t stat_session_usecs_off; /* waiting session offset */
+//     const char *name; /* Mutex name */
 
-    int8_t initialized; /* Lock initialized, for cleanup */
+//     /*
+//      * We track acquisitions and time spent waiting for some locks. For performance reasons and to
+//      * make it possible to write generic code that tracks statistics for different locks, we store
+//      * the offset of the statistics fields to be updated during lock acquisition.
+//      */
+//     int16_t stat_count_off;         /* acquisitions offset */
+//     int16_t stat_app_usecs_off;     /* waiting application threads offset */
+//     int16_t stat_int_usecs_off;     /* waiting server threads offset */
+//     int16_t stat_session_usecs_off; /* waiting session offset */
 
-#if SPINLOCK_TYPE == SPINLOCK_GCC
-    WT_CACHE_LINE_PAD_END
-#endif
-};
+//     int8_t initialized; /* Lock initialized, for cleanup */
+
+// #if SPINLOCK_TYPE == SPINLOCK_GCC
+//     WT_CACHE_LINE_PAD_END
+// #endif
+// };
