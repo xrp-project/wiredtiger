@@ -2322,6 +2322,15 @@ int
 wiredtiger_open(const char *home, WT_EVENT_HANDLER *event_handler, const char *config,
   WT_CONNECTION **connectionp)
 {
+
+    printf("Printing size of specific structs to stub them in BPF!\n");
+    WT_SPINLOCK spinlock;
+    printf("size of WT_SPINLOCK: %lu\n", sizeof(spinlock));
+    wt_mutex_t mutex;
+    printf("size of wt_mutex_t: %lu\n", sizeof(mutex));
+    wt_cond_t condition_var;
+    printf("size of wt_cond_t: %lu\n", sizeof(condition_var));
+
     static const WT_CONNECTION stdc = {__conn_async_flush, __conn_async_new_op, __conn_close,
       __conn_debug_info, __conn_reconfigure, __conn_get_home, __conn_configure_method,
       __conn_is_new, __conn_open_session, __conn_query_timestamp, __conn_set_timestamp,
