@@ -24,6 +24,12 @@ typedef long int off_t;
 #define false 0
 
 
+////////////
+// Errors //
+////////////
+
+#define EINVAL 22
+
 //////////
 // Time //
 //////////

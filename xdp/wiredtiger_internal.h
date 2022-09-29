@@ -2,6 +2,7 @@
 #define __WT_INTERNAL_H
 
 #include "basic_data_types.h"
+#include "stdarg.h"
 
 struct __wt_addr;
 typedef struct __wt_addr WT_ADDR;
@@ -294,6 +295,7 @@ typedef uint64_t wt_timestamp_t;
 #include "stat.h"
 #include "dhandle.h"
 #include "timestamp.h"
+#include "api.h"
 #include "bloom.h"
 #include "btmem.h"
 #include "compact.h" // required by session.h
