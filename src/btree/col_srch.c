@@ -58,7 +58,7 @@ __check_leaf_key_range(WT_SESSION_IMPL *session, uint64_t recno, WT_REF *leaf, W
  *     Search a column-store tree for a specific record-based key.
  */
 int
-__wt_col_search(
+ __wt_col_search(
   WT_CURSOR_BTREE *cbt, uint64_t search_recno, WT_REF *leaf, bool leaf_safe, bool *leaf_foundp)
 {
     WT_BTREE *btree;

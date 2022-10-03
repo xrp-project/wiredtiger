@@ -450,6 +450,7 @@ __wt_cursor_set_keyv(WT_CURSOR *cursor, uint32_t flags, va_list ap)
         /* Fast path some common cases and special case WT_ITEMs. */
         fmt = cursor->key_format;
         if (LF_ISSET(WT_CURSOR_RAW_OK | WT_CURSTD_DUMP_JSON) || WT_STREQ(fmt, "u")) {
+            // Used inside __clsm_lookup to copy key from clsm cursor to btree cursor
             item = va_arg(ap, WT_ITEM *);
             sz = item->size;
             buf->data = item->data;

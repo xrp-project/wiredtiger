@@ -298,12 +298,14 @@ typedef uint64_t wt_timestamp_t;
 #include "api.h"
 #include "bloom.h"
 #include "btmem.h"
+#include "btree.h" // required by session.h
 #include "compact.h" // required by session.h
 #include "cursor.h"
 #include "log.h"
 #include "lsm.h"
 #include "txn.h"
 #include "session.h"
+#include "connection.h" // required by session.h
 
 
 #endif // __WT_INTERNAL_H

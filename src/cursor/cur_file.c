@@ -192,8 +192,11 @@ __curfile_search(WT_CURSOR *cursor)
     uint64_t time_start, time_stop;
 
     cbt = (WT_CURSOR_BTREE *)cursor;
+    // Records last operation plus some timing stuff. Don't need it.
     CURSOR_API_CALL(cursor, session, search, CUR2BT(cbt));
+    // Debugging mode. Skip
     WT_ERR(__cursor_copy_release(cursor));
+    // We set the key before, don't check here too.
     WT_ERR(__cursor_checkkey(cursor));
 
     time_start = __wt_clock(session);
