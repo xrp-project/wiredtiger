@@ -301,6 +301,7 @@ typedef uint64_t wt_timestamp_t;
 #include "btree.h" // required by session.h
 #include "compact.h" // required by session.h
 #include "cursor.h"
+#include "cache.h"
 #include "log.h"
 #include "lsm.h"
 #include "txn.h"

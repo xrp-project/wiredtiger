@@ -61,6 +61,8 @@
         "bloom.h": "c",
         "wiredtiger_config.h": "c",
         "compact.h": "c",
-        "btree.h": "c"
+        "btree.h": "c",
+        "lsm.h": "c",
+        "log.h": "c"
     }
 }

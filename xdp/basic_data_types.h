@@ -23,6 +23,8 @@ typedef long int off_t;
 #define true 1
 #define false 0
 
+typedef long int		intptr_t;
+typedef unsigned long int	uintptr_t;
 
 ////////////
 // Errors //

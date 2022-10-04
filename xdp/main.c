@@ -95,6 +95,24 @@ __wt_txn_context_prepare_check(WT_SESSION_IMPL *session)
     return (0);
 }
 
+/*
+ * __wt_txn_autocommit_check --
+ *     If an auto-commit transaction is required, start one.
+ */
+static inline int
+__wt_txn_autocommit_check(WT_SESSION_IMPL *session)
+{
+    WT_TXN *txn;
+
+    txn = session->txn;
+    if (F_ISSET(txn, WT_TXN_AUTOCOMMIT)) {
+        RET_MSG(-1, "__wt_txn_autocommit_check: Autocommit should not be set");
+        // F_CLR(txn, WT_TXN_AUTOCOMMIT);
+        // return (__wt_txn_begin(session, NULL));
+    }
+    return (0);
+}
+
 static inline void
 __cursor_novalue(WT_CURSOR *cursor)
 {
@@ -442,6 +460,54 @@ __wt_split_descent_race(WT_SESSION_IMPL *session, WT_REF *ref, WT_PAGE_INDEX *sa
     WT_BARRIER();
     WT_INTL_INDEX_GET(session, ref->home, pindex);
     return (pindex != saved_pindex);
+}
+
+/*
+ * __wt_cache_read_gen --
+ *     Get the current read generation number.
+ */
+static inline uint64_t
+__wt_cache_read_gen(WT_SESSION_IMPL *session)
+{
+    return (S2C(session)->cache->read_gen);
+}
+
+/*
+ * __wt_cache_read_gen_bump --
+ *     Update the page's read generation.
+ */
+static inline void
+__wt_cache_read_gen_bump(WT_SESSION_IMPL *session, WT_PAGE *page)
+{
+    /* Ignore pages set for forcible eviction. */
+    if (page->read_gen == WT_READGEN_OLDEST)
+        return;
+
+    /* Ignore pages already in the future. */
+    if (page->read_gen > __wt_cache_read_gen(session))
+        return;
+
+    /*
+     * We set read-generations in the future (where "the future" is measured by increments of the
+     * global read generation). The reason is because when acquiring a new hazard pointer for a
+     * page, we can check its read generation, and if the read generation isn't less than the
+     * current global generation, we don't bother updating the page. In other words, the goal is to
+     * avoid some number of updates immediately after each update we have to make.
+     */
+    page->read_gen = __wt_cache_read_gen(session) + WT_READGEN_STEP;
+}
+
+/*
+ * __wt_cache_read_gen_new --
+ *     Get the read generation for a new page in memory.
+ */
+static inline void
+__wt_cache_read_gen_new(WT_SESSION_IMPL *session, WT_PAGE *page)
+{
+    WT_CACHE *cache;
+
+    cache = S2C(session)->cache;
+    page->read_gen = (__wt_cache_read_gen(session) + cache->read_gen_oldest) / 2;
 }
 
 
@@ -981,35 +1047,120 @@ skip_evict:
                 0 :
                 __wt_txn_autocommit_check(session));
         default:
-            return (__wt_illegal_value(session, current_state));
+            RET_MSG(-1, "__wt_page_in_func: ILLEGAL VALUE!");
+            // return (__wt_illegal_value(session, current_state));
         }
 
         /*
          * We failed to get the page -- yield before retrying, and if we've yielded enough times,
          * start sleeping so we don't burn CPU to no purpose.
          */
-        if (yield_cnt < WT_THOUSAND) {
-            if (!stalled) {
-                ++yield_cnt;
-                __wt_yield();
-                continue;
-            }
-            yield_cnt = WT_THOUSAND;
-        }
+        // NOTE: We can't yield in BPF!
+        // TODO: Should we retry in BPF here?
+        // if (yield_cnt < WT_THOUSAND) {
+        //     if (!stalled) {
+        //         ++yield_cnt;
+        //         __wt_yield();
+        //         continue;
+        //     }
+        //     yield_cnt = WT_THOUSAND;
+        // }
 
         /*
          * If stalling and this thread is allowed to do eviction work, check if the cache needs help
          * evicting clean pages (don't force a read to do dirty eviction). If we do work for the
          * cache, substitute that for a sleep.
          */
-        if (!LF_ISSET(WT_READ_IGNORE_CACHE_SIZE)) {
-            WT_RET(__wt_cache_eviction_check(session, true, true, &cache_work));
-            if (cache_work)
-                continue;
-        }
-        __wt_spin_backoff(&yield_cnt, &sleep_usecs);
-        WT_STAT_CONN_INCRV(session, page_sleep, sleep_usecs);
+        // NOTE: No evictions, no yields.
+        // if (!LF_ISSET(WT_READ_IGNORE_CACHE_SIZE)) {
+        //     WT_RET(__wt_cache_eviction_check(session, true, true, &cache_work));
+        //     if (cache_work)
+        //         continue;
+        // }
+        // __wt_spin_backoff(&yield_cnt, &sleep_usecs);
+        // WT_STAT_CONN_INCRV(session, page_sleep, sleep_usecs);
     }
+}
+
+
+/*
+ * __wt_lex_compare_skip --
+ *     Lexicographic comparison routine, skipping leading bytes. Returns: < 0 if user_item is
+ *     lexicographically < tree_item = 0 if user_item is lexicographically = tree_item > 0 if
+ *     user_item is lexicographically > tree_item We use the names "user" and "tree" so it's clear
+ *     in the btree code which the application is looking at when we call its comparison function.
+ */
+static inline int
+__wt_lex_compare_skip(const WT_ITEM *user_item, const WT_ITEM *tree_item, size_t *matchp)
+{
+    size_t len, usz, tsz;
+    const uint8_t *userp, *treep;
+
+    usz = user_item->size;
+    tsz = tree_item->size;
+    len = WT_MIN(usz, tsz) - *matchp;
+
+    userp = (const uint8_t *)user_item->data + *matchp;
+    treep = (const uint8_t *)tree_item->data + *matchp;
+
+    // NOTE: Remove all vectorized instructions. They are not available in
+    // the kernel.
+// #ifdef HAVE_X86INTRIN_H
+//     /* Use vector instructions if we'll execute at least 2 of them. */
+//     if (len >= WT_VECTOR_SIZE * 2) {
+//         size_t remain;
+//         __m128i res_eq, u, t;
+
+//         remain = len % WT_VECTOR_SIZE;
+//         len -= remain;
+//         if (WT_ALIGNED_16(userp) && WT_ALIGNED_16(treep))
+//             for (; len > 0; len -= WT_VECTOR_SIZE, userp += WT_VECTOR_SIZE, treep += WT_VECTOR_SIZE,
+//                  *matchp += WT_VECTOR_SIZE) {
+//                 u = _mm_load_si128((const __m128i *)userp);
+//                 t = _mm_load_si128((const __m128i *)treep);
+//                 res_eq = _mm_cmpeq_epi8(u, t);
+//                 if (_mm_movemask_epi8(res_eq) != 65535)
+//                     break;
+//             }
+//         else
+//             for (; len > 0; len -= WT_VECTOR_SIZE, userp += WT_VECTOR_SIZE, treep += WT_VECTOR_SIZE,
+//                  *matchp += WT_VECTOR_SIZE) {
+//                 u = _mm_loadu_si128((const __m128i *)userp);
+//                 t = _mm_loadu_si128((const __m128i *)treep);
+//                 res_eq = _mm_cmpeq_epi8(u, t);
+//                 if (_mm_movemask_epi8(res_eq) != 65535)
+//                     break;
+//             }
+//         len += remain;
+//     }
+// #elif defined(HAVE_ARM_NEON_INTRIN_H)
+//     /* Use vector instructions if we'll execute  at least 1 of them. */
+//     if (len >= WT_VECTOR_SIZE) {
+//         size_t remain;
+//         uint8x16_t res_eq, u, t;
+//         remain = len % WT_VECTOR_SIZE;
+//         len -= remain;
+//         if (WT_ALIGNED_16(userp) && WT_ALIGNED_16(treep))
+//             for (; len > 0; len -= WT_VECTOR_SIZE, userp += WT_VECTOR_SIZE, treep += WT_VECTOR_SIZE,
+//                  *matchp += WT_VECTOR_SIZE) {
+//                 u = vld1q_u8(userp);
+//                 t = vld1q_u8(treep);
+//                 res_eq = vceqq_u8(u, t);
+//                 if (vminvq_u8(res_eq) != 255)
+//                     break;
+//             }
+//         len += remain;
+//     }
+// #endif
+    /*
+     * Use the non-vectorized version for the remaining bytes and for the small key sizes.
+     */
+    for (; len > 0; --len, ++userp, ++treep, ++*matchp)
+        if (*userp != *treep)
+            return (*userp < *treep ? -1 : 1);
+
+    /* Contents are equal up to the smallest length. */
+    return ((usz == tsz) ? 0 : (usz < tsz) ? -1 : 1);
 }
 
 
@@ -1085,6 +1236,53 @@ __wt_page_swap_func(WT_SESSION_IMPL *session, WT_REF *held, WT_REF *want, uint32
 
     return (ret);
 }
+
+/*
+ * __wt_ref_key --
+ *     Return a reference to a row-store internal page key as cheaply as possible.
+ */
+static inline void
+__wt_ref_key(WT_PAGE *page, WT_REF *ref, void *keyp, size_t *sizep)
+{
+    uintptr_t v;
+
+/*
+ * An internal page key is in one of two places: if we instantiated the
+ * key (for example, when reading the page), WT_REF.ref_ikey references
+ * a WT_IKEY structure, otherwise WT_REF.ref_ikey references an on-page
+ * key offset/length pair.
+ *
+ * Now the magic: allocated memory must be aligned to store any standard
+ * type, and we expect some standard type to require at least quad-byte
+ * alignment, so allocated memory should have some clear low-order bits.
+ * On-page objects consist of an offset/length pair: the maximum page
+ * size currently fits into 29 bits, so we use the low-order bits of the
+ * pointer to mark the other bits of the pointer as encoding the key's
+ * location and length.  This breaks if allocated memory isn't aligned,
+ * of course.
+ *
+ * In this specific case, we use bit 0x01 to mark an on-page key, else
+ * it's a WT_IKEY reference.  The bit pattern for internal row-store
+ * on-page keys is:
+ *	32 bits		key length
+ *	31 bits		page offset of the key's bytes,
+ *	 1 bits		flags
+ */
+#define WT_IK_FLAG 0x01
+#define WT_IK_ENCODE_KEY_LEN(v) ((uintptr_t)(v) << 32)
+#define WT_IK_DECODE_KEY_LEN(v) ((v) >> 32)
+#define WT_IK_ENCODE_KEY_OFFSET(v) ((uintptr_t)(v) << 1)
+#define WT_IK_DECODE_KEY_OFFSET(v) (((v)&0xFFFFFFFF) >> 1)
+    v = (uintptr_t)ref->ref_ikey;
+    if (v & WT_IK_FLAG) {
+        *(void **)keyp = WT_PAGE_REF_OFFSET(page, WT_IK_DECODE_KEY_OFFSET(v));
+        *sizep = WT_IK_DECODE_KEY_LEN(v);
+    } else {
+        *(void **)keyp = WT_IKEY_DATA(ref->ref_ikey);
+        *sizep = ((WT_IKEY *)ref->ref_ikey)->size;
+    }
+}
+
 
 /*
  * __wt_row_search --
@@ -1277,7 +1475,7 @@ restart:
             //         --limit;
             //     } else if (cmp == 0)
             //         goto descend;
-            }
+            // }
 
         /*
          * Set the slot to descend the tree: descent was already set if there was an exact match on
