@@ -14,6 +14,8 @@ typedef unsigned long long uint64_t;
 
 typedef unsigned int __u_int;
 typedef __u_int u_int;
+typedef unsigned char __u_char;
+typedef __u_char u_char;
 typedef long unsigned int size_t;
 typedef long int ssize_t;
 

@@ -120,6 +120,150 @@ __cursor_novalue(WT_CURSOR *cursor)
 }
 
 /*
+ * __wt_cursor_kv_not_set --
+ *     Standard error message for key/values not set.
+ */
+int
+__wt_cursor_kv_not_set(WT_CURSOR *cursor, bool key) WT_GCC_FUNC_ATTRIBUTE((cold))
+{
+    WT_SESSION_IMPL *session;
+
+    session = CUR2S(cursor);
+
+    WT_RET_MSG(session, cursor->saved_err == 0 ? EINVAL : cursor->saved_err, "requires %s be set",
+      key ? "key" : "value");
+}
+
+/*
+ * __wt_cursor_get_valuev --
+ *     WT_CURSOR->get_value worker implementation.
+ */
+int
+__wt_cursor_get_valuev(WT_CURSOR *cursor, va_list ap)
+{
+    WT_DECL_RET;
+    WT_ITEM *value;
+    WT_SESSION_IMPL *session;
+    const char *fmt;
+
+    CURSOR_API_CALL(cursor, session, get_value, NULL);
+
+    if (!F_ISSET(cursor, WT_CURSTD_VALUE_EXT | WT_CURSTD_VALUE_INT))
+        WT_ERR(__wt_cursor_kv_not_set(cursor, false));
+
+    // NOTE: No debug mode!
+    // /* Force an allocated copy when using cursor copy debug. */
+    // if (FLD_ISSET(S2C(session)->debug_flags, WT_CONN_DEBUG_CURSOR_COPY))
+    //     WT_ERR(__wt_buf_grow(session, &cursor->value, cursor->value.size));
+
+    /* Fast path some common cases. */
+    fmt = cursor->value_format;
+    if (F_ISSET(cursor, WT_CURSOR_RAW_OK) || WT_STREQ(fmt, "u")) {
+        value = va_arg(ap, WT_ITEM *);
+        value->data = cursor->value.data;
+        value->size = cursor->value.size;
+    } else if (WT_STREQ(fmt, "S"))
+        *va_arg(ap, const char **) = cursor->value.data;
+    else if (WT_STREQ(fmt, "t") || (__wt_isdigit((u_char)fmt[0]) && WT_STREQ(fmt + 1, "t")))
+        *va_arg(ap, uint8_t *) = *(uint8_t *)cursor->value.data;
+    else
+        // NOTE: This should never happen!
+        // ret = __wt_struct_unpackv(session, cursor->value.data, cursor->value.size, fmt, ap);
+err:
+    API_END_RET(session, ret);
+}
+
+
+
+/*
+ * __wt_cursor_get_value --
+ *     WT_CURSOR->get_value default implementation.
+ */
+int
+__wt_cursor_get_value(WT_CURSOR *cursor, ...)
+{
+    WT_DECL_RET;
+    va_list ap;
+
+    va_start(ap, cursor);
+    ret = __wt_cursor_get_valuev(cursor, ap);
+    va_end(ap);
+    return (ret);
+}
+
+/*
+ * __wt_cursor_get_keyv --
+ *     WT_CURSOR->get_key worker function.
+ */
+int
+__wt_cursor_get_keyv(WT_CURSOR *cursor, uint32_t flags, va_list ap)
+{
+    WT_DECL_RET;
+    WT_ITEM *key;
+    WT_SESSION_IMPL *session;
+    size_t size;
+    const char *fmt;
+
+    CURSOR_API_CALL(cursor, session, get_key, NULL);
+    if (!F_ISSET(cursor, WT_CURSTD_KEY_SET))
+        WT_ERR(__wt_cursor_kv_not_set(cursor, true));
+
+    // NOTE: No debug mode!
+    // /* Force an allocated copy when using cursor copy debug. */
+    // if (FLD_ISSET(S2C(session)->debug_flags, WT_CONN_DEBUG_CURSOR_COPY))
+    //     WT_ERR(__wt_buf_grow(session, &cursor->key, cursor->key.size));
+
+    if (WT_CURSOR_RECNO(cursor)) {
+        if (LF_ISSET(WT_CURSTD_RAW)) {
+            // We should never enter this
+            RET_MSG(-1, "__wt_cursor_get_keyv: WT_CURSTD_RAW!");
+            // key = va_arg(ap, WT_ITEM *);
+            // key->data = cursor->raw_recno_buf;
+            // WT_ERR(__wt_struct_size(session, &size, "q", cursor->recno));
+            // key->size = size;
+            // ret = __wt_struct_pack(
+            //   session, cursor->raw_recno_buf, sizeof(cursor->raw_recno_buf), "q", cursor->recno);
+        } else
+            *va_arg(ap, uint64_t *) = cursor->recno;
+    } else {
+        /* Fast path some common cases. */
+        fmt = cursor->key_format;
+        if (LF_ISSET(WT_CURSOR_RAW_OK) || WT_STREQ(fmt, "u")) {
+            key = va_arg(ap, WT_ITEM *);
+            key->data = cursor->key.data;
+            key->size = cursor->key.size;
+        } else if (WT_STREQ(fmt, "S"))
+            *va_arg(ap, const char **) = cursor->key.data;
+        else
+            RET_MSG(-1, "__wt_cursor_get_keyv: unexpected path");
+            // NOTE: Unused
+            // ret = __wt_struct_unpackv(session, cursor->key.data, cursor->key.size, fmt, ap);
+    }
+
+err:
+    API_END_RET(session, ret);
+}
+
+
+
+/*
+ * __wt_cursor_get_key --
+ *     WT_CURSOR->get_key default implementation.
+ */
+int
+__wt_cursor_get_key(WT_CURSOR *cursor, ...)
+{
+    WT_DECL_RET;
+    va_list ap;
+
+    va_start(ap, cursor);
+    ret = __wt_cursor_get_keyv(cursor, cursor->flags, ap);
+    va_end(ap);
+    return (ret);
+}
+
+
+/*
  * __wt_cursor_set_keyv --
  *     WT_CURSOR->set_key default implementation.
  */
@@ -169,14 +313,12 @@ __wt_cursor_set_keyv(WT_CURSOR *cursor, uint32_t flags, va_list ap)
             buf->data = item->data;
         } else if (WT_STREQ(fmt, "S")) {
             // Used to point lsm cursor to user-provided string.
-            // We won't enter this.
-            RET_MSG(-1, "__wt_cursor_set_keyv: format=S!");
-            // str = va_arg(ap, const char *);
-            // sz = strlen(str) + 1;
-            // buf->data = (void *)str;
+            str = va_arg(ap, const char *);
+            sz = strlen(str) + 1;
+            buf->data = (void *)str;
         } else {
             // We should never enter this!
-            RET_MSG(-1, "__wt_cursor_set_keyv: format=S!");
+            RET_MSG(-1, "__wt_cursor_set_keyv: custom struct!");
             // va_copy(ap_copy, ap);
             // ret = __wt_struct_sizev(session, &sz, cursor->key_format, ap_copy);
             // va_end(ap_copy);
@@ -1820,23 +1962,28 @@ leaf_match:
     if (WT_SKIP_FIRST(ins_head) == NULL)
         return (0);
 
+    RET_MSG(-1, "skiplists not implemented yet!");
+
     /*
      * Test for an append first when inserting onto an insert list, try to catch cursors repeatedly
      * inserting at a single point.
      */
-    if (insert) {
-        WT_ERR(__search_insert_append(session, cbt, ins_head, srch_key, &done));
-        if (done)
-            return (0);
-    }
-    WT_ERR(__wt_search_insert(session, cbt, ins_head, srch_key));
+    // NOTE: Skiplists not implemented yet!
+    // if (insert) {
+    //     WT_ERR(__search_insert_append(session, cbt, ins_head, srch_key, &done));
+    //     if (done)
+    //         return (0);
+    // }
+    // WT_ERR(__wt_search_insert(session, cbt, ins_head, srch_key));
 
-    return (0);
+    // return (0);
 
 err:
     WT_TRET(__wt_page_release(session, current, 0));
     return (ret);
 }
+
+
 
 /*
  * __wt_row_leaf_key --
@@ -1867,8 +2014,9 @@ __wt_row_leaf_key(
      * The alternative is an on-page cell with some kind of compressed or overflow key that's never
      * been instantiated. Call the underlying worker function to figure it out.
      */
-    // NEXTDAY: Continue here!
-    return (__wt_row_leaf_key_work(session, page, rip, key, instantiate));
+    // NOTE: We don't use prefix compression!
+    RET_MSG(-1, "__wt_row_leaf_key: Prefix compression path entered!");
+    // return (__wt_row_leaf_key_work(session, page, rip, key, instantiate));
 }
 
 
@@ -1928,9 +2076,11 @@ __wt_btcur_search(WT_CURSOR_BTREE *cbt)
             if (cbt->compare == 0)
                 WT_ERR(__wt_cursor_valid(cbt, cbt->tmp, WT_RECNO_OOB, &valid));
         } else {
-            WT_ERR(__cursor_col_search(cbt, NULL, NULL));
-            if (cbt->compare == 0)
-                WT_ERR(__wt_cursor_valid(cbt, NULL, cbt->recno, &valid));
+            // NOTE: Add when adding Bloom filter support.
+            RET_MSG(-1, "__wt_btcur_search: Bloom filter support not implemented yet");
+            // WT_ERR(__cursor_col_search(cbt, NULL, NULL));
+            // if (cbt->compare == 0)
+            //     WT_ERR(__wt_cursor_valid(cbt, NULL, cbt->recno, &valid));
         }
     }
 
@@ -1964,6 +2114,129 @@ err:
     return (ret);
 }
 
+/*
+ * __curfile_search --
+ *     WT_CURSOR->search method for the btree cursor type.
+ */
+static int
+__curfile_search(WT_CURSOR *cursor)
+{
+    WT_CURSOR_BTREE *cbt;
+    WT_DECL_RET;
+    WT_SESSION_IMPL *session;
+    uint64_t time_start, time_stop;
+
+    cbt = (WT_CURSOR_BTREE *)cursor;
+    // NOTE: Records last operation plus some timing stuff. Don't need it.
+    // CURSOR_API_CALL(cursor, session, search, CUR2BT(cbt));
+    // NOTE: Debugging mode. Skip
+    // WT_ERR(__cursor_copy_release(cursor));
+    // NOTE: We set the key before, don't check here too.
+    // WT_ERR(__cursor_checkkey(cursor));
+
+    // time_start = __wt_clock(session);
+    WT_ERR(__wt_btcur_search(cbt));
+    // time_stop = __wt_clock(session);
+    // __wt_stat_usecs_hist_incr_opread(session, WT_CLOCKDIFF_US(time_stop, time_start));
+
+    /* Search maintains a position, key and value. */
+    WT_ASSERT(session, F_ISSET(cbt, WT_CBT_ACTIVE) &&
+        F_MASK(cursor, WT_CURSTD_KEY_SET) == WT_CURSTD_KEY_INT &&
+        F_MASK(cursor, WT_CURSTD_VALUE_SET) == WT_CURSTD_VALUE_INT);
+
+err:
+    // NOTE: Records last operation plus some timing stuff. Don't need it.
+    // API_END_RET(session, ret);
+}
+
+
+/*
+ * __clsm_lookup --
+ *     Position an LSM cursor.
+ */
+static int
+__clsm_lookup(WT_CURSOR_LSM *clsm, WT_ITEM *value)
+{
+    WT_BLOOM *bloom;
+    WT_BLOOM_HASH bhash;
+    WT_CURSOR *c, *cursor;
+    WT_DECL_RET;
+    WT_SESSION_IMPL *session;
+    u_int i;
+    bool have_hash;
+
+    c = NULL;
+    cursor = &clsm->iface;
+    have_hash = false;
+    session = CUR2S(cursor);
+
+    WT_FORALL_CURSORS(clsm, c, i)
+    {
+        // NOTE: Skip bloom filters for now!
+        /* If there is a Bloom filter, see if we can skip the read. */
+        // bloom = NULL;
+        // if ((bloom = clsm->chunks[i]->bloom) != NULL) {
+        //     if (!have_hash) {
+        //         __wt_bloom_hash(bloom, &cursor->key, &bhash);
+        //         have_hash = true;
+        //     }
+
+        //     WT_ERR_NOTFOUND_OK(__wt_bloom_hash_get(bloom, &bhash), true);
+        //     if (ret == WT_NOTFOUND) {
+        //         WT_LSM_TREE_STAT_INCR(session, clsm->lsm_tree->bloom_miss);
+        //         continue;
+        //     }
+        //     if (ret == 0)
+        //         WT_LSM_TREE_STAT_INCR(session, clsm->lsm_tree->bloom_hit);
+        // }
+
+        // Original code:
+        // c->set_key(c, &cursor->key);
+        __wt_cursor_set_key(c, &cursor->key);
+        // Original code:
+        // if ((ret = c->search(c)) == 0) {
+        if ((ret = __curfile_search(c)) == 0) {
+            // Fill buffer with the result!
+            // We saw the result was stored in cbt->slot.
+
+            // Original code:
+            // WT_ERR(c->get_key(c, &cursor->key));
+            WT_ERR(__wt_cursor_get_key(c, &cursor->key));
+
+            // Original code:
+            // WT_ERR(c->get_value(c, value));
+            WT_ERR(__wt_cursor_get_value(c, value));
+            if (__clsm_deleted(clsm, value))
+                ret = WT_NOTFOUND;
+            goto done;
+        }
+        WT_ERR_NOTFOUND_OK(ret, false);
+        F_CLR(c, WT_CURSTD_KEY_SET);
+
+        // NOTE: We don't care about stats.
+        /* Update stats: the active chunk can't have a bloom filter. */
+        // if (bloom != NULL)
+        //     WT_LSM_TREE_STAT_INCR(session, clsm->lsm_tree->bloom_false_positive);
+        // else if (clsm->primary_chunk == NULL || i != clsm->nchunks)
+        //     WT_LSM_TREE_STAT_INCR(session, clsm->lsm_tree->lsm_lookup_no_bloom);
+    }
+    WT_ERR(WT_NOTFOUND);
+
+done:
+err:
+    if (ret == 0) {
+        F_CLR(cursor, WT_CURSTD_KEY_SET | WT_CURSTD_VALUE_SET);
+        F_SET(cursor, WT_CURSTD_KEY_INT);
+        clsm->current = c;
+        if (value == &cursor->value)
+            F_SET(cursor, WT_CURSTD_VALUE_INT);
+    } else if (c != NULL)
+        WT_TRET(c->reset(c));
+
+    return (ret);
+}
+
+
 
 ///////////////////////
 // Main BPF function //
@@ -1974,6 +2247,8 @@ err:
 // - __cursor_col_search
 // - __cursor_kv_return
 // - __cursor_fix_implicit
+// - strlen
+// - strcmp
 
 struct thread_fn_args {
     WT_CONNECTION *conn;
@@ -1998,7 +2273,7 @@ int simulate_bpf_read(WT_CONNECTION *conn, WT_SESSION_IMPL *session,
     ///////////////////
     // __clsm_search //
     ///////////////////
-
+    WT_DECL_RET;
     WT_CURSOR_LSM *clsm;
     clsm = (WT_CURSOR_LSM *)cursor;
 
@@ -2041,7 +2316,7 @@ int simulate_bpf_read(WT_CONNECTION *conn, WT_SESSION_IMPL *session,
         ///////////////////////
         // __wt_btcur_search //
         ///////////////////////
-        WT_BTREE *btree = CUR2BT(cbt);
+        WT_RET(__wt_btcur_search(cbt));
 
         // TODO: If found, set key, value
 
