@@ -1631,8 +1631,7 @@ __wt_hazard_clear(WT_SESSION_IMPL *session, WT_REF *ref)
      * didn't have pinned down implies corruption.
      */
     // TODO: Handle the panic here, possibly convert to return int.
-    WT_RET_PANIC(session, EINVAL, "session %p: clear hazard pointer: %p: not found",
-      (void *)session, (void *)ref);
+    RET_MSG(EINVAL, "session %p: clear hazard pointer: %p: not found", (void *)session, (void *)ref);
 }
 
 

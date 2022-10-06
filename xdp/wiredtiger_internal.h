@@ -295,6 +295,7 @@ typedef uint64_t wt_timestamp_t;
 #include "stat.h"
 #include "dhandle.h"
 #include "timestamp.h"
+#include "timestamp.i"
 #include "api.h"
 #include "bloom.h"
 #include "btmem.h"

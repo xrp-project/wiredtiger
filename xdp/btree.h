@@ -273,3 +273,7 @@ struct __wt_salvage_cookie {
 
     bool done; /* Ignore the rest */
 };
+
+
+// From btree.i
+#define WT_COMPARE_SHORT_MAXLEN 9
