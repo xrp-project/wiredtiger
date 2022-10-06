@@ -120,6 +120,942 @@ __cursor_novalue(WT_CURSOR *cursor)
 }
 
 /*
+ * __key_return --
+ *     Change the cursor to reference an internal return key.
+ */
+static inline int
+__key_return(WT_CURSOR_BTREE *cbt)
+{
+    WT_CURSOR *cursor;
+    WT_ITEM *tmp;
+    WT_PAGE *page;
+    WT_ROW *rip;
+    WT_SESSION_IMPL *session;
+
+    page = cbt->ref->page;
+    cursor = &cbt->iface;
+    session = CUR2S(cbt);
+
+    if (page->type == WT_PAGE_ROW_LEAF) {
+        rip = &page->pg_row[cbt->slot];
+
+        /*
+         * If the cursor references a WT_INSERT item, take its key. Else, if we have an exact match,
+         * we copied the key in the search function, take it from there. If we don't have an exact
+         * match, take the key from the original page.
+         */
+        if (cbt->ins != NULL) {
+            cursor->key.data = WT_INSERT_KEY(cbt->ins);
+            cursor->key.size = WT_INSERT_KEY_SIZE(cbt->ins);
+            return (0);
+        }
+
+        if (cbt->compare == 0) {
+            /*
+             * If not in an insert list and there's an exact match, the row-store search function
+             * built the key we want to return in the cursor's temporary buffer. Swap the cursor's
+             * search-key and temporary buffers so we can return it (it's unsafe to return the
+             * temporary buffer itself because our caller might do another search in this table
+             * using the key we return, and we'd corrupt the search key during any subsequent search
+             * that used the temporary buffer).
+             */
+            tmp = cbt->row_key;
+            cbt->row_key = cbt->tmp;
+            cbt->tmp = tmp;
+
+            cursor->key.data = cbt->row_key->data;
+            cursor->key.size = cbt->row_key->size;
+            return (0);
+        }
+        return (__wt_row_leaf_key(session, page, rip, &cursor->key, false));
+    }
+
+    /*
+     * WT_PAGE_COL_FIX, WT_PAGE_COL_VAR:
+     *	The interface cursor's record has usually been set, but that
+     * isn't universally true, specifically, cursor.search_near may call
+     * here without first setting the interface cursor.
+     */
+    cursor->recno = cbt->recno;
+    return (0);
+}
+
+
+/*
+ * __wt_key_return --
+ *     Change the cursor to reference an internal return key.
+ */
+int
+__wt_key_return(WT_CURSOR_BTREE *cbt)
+{
+    WT_CURSOR *cursor;
+
+    cursor = &cbt->iface;
+
+    /*
+     * We may already have an internal key and the cursor may not be set up to get another copy, so
+     * we have to leave it alone. Consider a cursor search followed by an update: the update doesn't
+     * repeat the search, it simply updates the currently referenced key's value. We will end up
+     * here with the correct internal key, but we can't "return" the key again even if we wanted to
+     * do the additional work, the cursor isn't set up for that because we didn't just complete a
+     * search.
+     */
+    F_CLR(cursor, WT_CURSTD_KEY_EXT);
+    if (!F_ISSET(cursor, WT_CURSTD_KEY_INT)) {
+        WT_RET(__key_return(cbt));
+        F_SET(cursor, WT_CURSTD_KEY_INT);
+    }
+    return (0);
+}
+
+/*
+ * __wt_row_leaf_value --
+ *     Return the value for a row-store leaf page encoded key/value pair.
+ */
+static inline bool
+__wt_row_leaf_value(WT_PAGE *page, WT_ROW *rip, WT_ITEM *value)
+{
+    uintptr_t v;
+
+    /* The row-store key can change underfoot; explicitly take a copy. */
+    v = (uintptr_t)WT_ROW_KEY_COPY(rip);
+
+    /*
+     * See the comment in __wt_row_leaf_key_info for an explanation of the magic.
+     */
+    if ((v & 0x03) == WT_KV_FLAG) {
+        value->data = WT_PAGE_REF_OFFSET(page, WT_KV_DECODE_VALUE_OFFSET(v));
+        value->size = WT_KV_DECODE_VALUE_LEN(v);
+        return (true);
+    }
+    return (false);
+}
+
+/*
+ * __wt_row_leaf_value --
+ *     Return the value for a row-store leaf page encoded key/value pair.
+ */
+static inline bool
+__wt_row_leaf_value(WT_PAGE *page, WT_ROW *rip, WT_ITEM *value)
+{
+    uintptr_t v;
+
+    /* The row-store key can change underfoot; explicitly take a copy. */
+    v = (uintptr_t)WT_ROW_KEY_COPY(rip);
+
+    /*
+     * See the comment in __wt_row_leaf_key_info for an explanation of the magic.
+     */
+    if ((v & 0x03) == WT_KV_FLAG) {
+        value->data = WT_PAGE_REF_OFFSET(page, WT_KV_DECODE_VALUE_OFFSET(v));
+        value->size = WT_KV_DECODE_VALUE_LEN(v);
+        return (true);
+    }
+    return (false);
+}
+
+/*
+ * __wt_buf_grow_worker --
+ *     Grow a buffer that may be in-use, and ensure that all data is local to the buffer.
+ */
+int
+__wt_buf_grow_worker(WT_SESSION_IMPL *session, WT_ITEM *buf, size_t size)
+  WT_GCC_FUNC_ATTRIBUTE((visibility("default")))
+{
+    size_t offset;
+    bool copy_data;
+
+    /*
+     * Maintain the existing data: there are 3 cases:
+     *	No existing data: allocate the required memory, and initialize
+     * the data to reference it.
+     *	Existing data local to the buffer: set the data to the same
+     * offset in the re-allocated memory.
+     *	Existing data not-local to the buffer: copy the data into the
+     * buffer and set the data to reference it.
+     */
+    if (WT_DATA_IN_ITEM(buf)) {
+        offset = WT_PTRDIFF(buf->data, buf->mem);
+        copy_data = false;
+    } else {
+        offset = 0;
+        copy_data = buf->size > 0;
+    }
+
+    /*
+     * This function is also used to ensure data is local to the buffer, check to see if we actually
+     * need to grow anything.
+     */
+    if (size > buf->memsize) {
+        RET_MSG(-1, "__wt_buf_grow_worker: We should never enter this!");
+        // if (F_ISSET(buf, WT_ITEM_ALIGNED))
+        //     WT_RET(__wt_realloc_aligned(session, &buf->memsize, size, &buf->mem));
+        // else
+        //     WT_RET(__wt_realloc_noclear(session, &buf->memsize, size, &buf->mem));
+    }
+
+    if (buf->data == NULL) {
+        buf->data = buf->mem;
+        buf->size = 0;
+    } else {
+        if (copy_data)
+            memcpy(buf->mem, buf->data, buf->size);
+        buf->data = (uint8_t *)buf->mem + offset;
+    }
+
+    return (0);
+}
+
+/*
+ * __wt_buf_grow --
+ *     Grow a buffer that may be in-use, and ensure that all data is local to the buffer.
+ */
+static inline int
+__wt_buf_grow(WT_SESSION_IMPL *session, WT_ITEM *buf, size_t size)
+{
+    return (
+      size > buf->memsize || !WT_DATA_IN_ITEM(buf) ? __wt_buf_grow_worker(session, buf, size) : 0);
+}
+
+/*
+ * __wt_buf_set --
+ *     Set the contents of the buffer.
+ */
+static inline int
+__wt_buf_set(WT_SESSION_IMPL *session, WT_ITEM *buf, const void *data, size_t size)
+{
+    /*
+     * The buffer grow function does what we need, but expects the data to be referenced by the
+     * buffer. If we're copying data from outside the buffer, set it up so it makes sense to the
+     * buffer grow function. (No test needed, this works if WT_ITEM.data is already set to "data".)
+     */
+    buf->data = data;
+    buf->size = size;
+    return (__wt_buf_grow(session, buf, size));
+}
+
+
+/*
+ * __wt_value_return_buf --
+ *     Change a buffer to reference an internal original-page return value.
+ */
+int
+__wt_value_return_buf(WT_CURSOR_BTREE *cbt, WT_REF *ref, WT_ITEM *buf, WT_TIME_WINDOW *tw)
+{
+    WT_BTREE *btree;
+    WT_CELL *cell;
+    // WT_CELL_UNPACK_KV unpack;
+    WT_CURSOR *cursor;
+    WT_PAGE *page;
+    WT_ROW *rip;
+    WT_SESSION_IMPL *session;
+    uint8_t v;
+
+    session = CUR2S(cbt);
+    btree = S2BT(session);
+
+    page = ref->page;
+    cursor = &cbt->iface;
+
+    if (page->type == WT_PAGE_ROW_LEAF) {
+        rip = &page->pg_row[cbt->slot];
+
+        /*
+         * If a value is simple and is globally visible at the time of reading a page into cache, we
+         * encode its location into the WT_ROW.
+         */
+        if (__wt_row_leaf_value(page, rip, buf)) {
+            if (tw != NULL)
+                WT_TIME_WINDOW_INIT(tw);
+            return (0);
+        }
+
+        // NOTE: This should never happen!
+        RET_MSG(-1, "__wt_value_return_buf: invalid path");
+
+        // /* Take the value from the original page cell. */
+        // __wt_row_leaf_value_cell(session, page, rip, NULL, &unpack);
+        // if (tw != NULL)
+        //     WT_TIME_WINDOW_COPY(tw, &unpack.tw);
+        // return (__wt_page_cell_data_ref(session, page, &unpack, buf));
+    }
+
+    if (page->type == WT_PAGE_COL_VAR) {
+        // NOTE: We should never enter this!
+        RET_MSG(-1, "__wt_value_return_buf: variable column store variable");
+        // /* Take the value from the original page cell. */
+        // cell = WT_COL_PTR(page, &page->pg_var[cbt->slot]);
+        // __wt_cell_unpack_kv(session, page->dsk, cell, &unpack);
+        // if (tw != NULL)
+        //     WT_TIME_WINDOW_COPY(tw, &unpack.tw);
+        // return (__wt_page_cell_data_ref(session, page, &unpack, buf));
+    }
+
+    /*
+     * WT_PAGE_COL_FIX: Take the value from the original page.
+     *
+     * FIXME-WT-6126: Should also check visibility here
+     */
+    if (tw != NULL)
+        WT_TIME_WINDOW_INIT(tw);
+    v = __bit_getv_recno(ref, cursor->recno, btree->bitcnt);
+    return (__wt_buf_set(session, buf, &v, 1));
+}
+
+
+/*
+ * __value_return --
+ *     Change the cursor to reference an internal original-page return value.
+ */
+static inline int
+__value_return(WT_CURSOR_BTREE *cbt)
+{
+    return (__wt_value_return_buf(cbt, cbt->ref, &cbt->iface.value, NULL));
+}
+
+/*
+ * __wt_value_return --
+ *     Change the cursor to reference an update return value.
+ */
+int
+__wt_value_return(WT_CURSOR_BTREE *cbt, WT_UPDATE_VALUE *upd_value)
+{
+    WT_CURSOR *cursor;
+    WT_SESSION_IMPL *session;
+
+    cursor = &cbt->iface;
+    session = CUR2S(cbt);
+
+    F_CLR(cursor, WT_CURSTD_VALUE_EXT);
+    if (upd_value->type == WT_UPDATE_INVALID) {
+        /*
+         * FIXME-WT-6127: This is a holdover from the pre-durable history read logic where we used
+         * to fallback to the on-page value if we didn't find a visible update elsewhere. This is
+         * still required for fixed length column store as we have issues with this table type in
+         * durable history which we're planning to address in PM-1814.
+         */
+        WT_ASSERT(session, CUR2BT(cbt)->type == BTREE_COL_FIX);
+        WT_RET(__value_return(cbt));
+    } else {
+        /*
+         * We're passed a "standard" update that's visible to us. Our caller should have already
+         * checked for deleted items (we're too far down the call stack to return not-found) and any
+         * modify updates should be have been reconstructed into a full standard update.
+         */
+        WT_ASSERT(session, upd_value->type == WT_UPDATE_STANDARD);
+        cursor->value.data = upd_value->buf.data;
+        cursor->value.size = upd_value->buf.size;
+    }
+    F_SET(cursor, WT_CURSTD_VALUE_INT);
+    return (0);
+}
+
+/*
+ * __wt_upd_value_clear --
+ *     Clear an update value to its defaults.
+ */
+static inline void
+__wt_upd_value_clear(WT_UPDATE_VALUE *upd_value)
+{
+    /*
+     * Make sure we don't touch the memory pointers here. If we have some allocated memory, that
+     * could come in handy next time we need to write to the buffer.
+     */
+    upd_value->buf.data = NULL;
+    upd_value->buf.size = 0;
+    WT_TIME_WINDOW_INIT(&upd_value->tw);
+    upd_value->type = WT_UPDATE_INVALID;
+}
+
+/*
+ * __wt_cell_type --
+ *     Return the cell's type (collapsing special types).
+ */
+static inline u_int
+__wt_cell_type(WT_CELL *cell)
+{
+    u_int type;
+
+    switch (WT_CELL_SHORT_TYPE(cell->__chunk[0])) {
+    case WT_CELL_KEY_SHORT:
+    case WT_CELL_KEY_SHORT_PFX:
+        return (WT_CELL_KEY);
+    case WT_CELL_VALUE_SHORT:
+        return (WT_CELL_VALUE);
+    }
+
+    switch (type = WT_CELL_TYPE(cell->__chunk[0])) {
+    case WT_CELL_KEY_PFX:
+        return (WT_CELL_KEY);
+    case WT_CELL_KEY_OVFL_RM:
+        return (WT_CELL_KEY_OVFL);
+    case WT_CELL_VALUE_OVFL_RM:
+        return (WT_CELL_VALUE_OVFL);
+    }
+    return (type);
+}
+
+/*
+ * __txn_visible_id --
+ *     Can the current transaction see the given ID?
+ */
+static inline bool
+__txn_visible_id(WT_SESSION_IMPL *session, uint64_t id)
+{
+    WT_TXN *txn;
+    bool found;
+
+    txn = session->txn;
+
+    /* Changes with no associated transaction are always visible. */
+    if (id == WT_TXN_NONE)
+        return (true);
+
+    /* Nobody sees the results of aborted transactions. */
+    if (id == WT_TXN_ABORTED)
+        return (false);
+
+    /* Transactions see their own changes. */
+    if (id == txn->id)
+        return (true);
+
+    /* Read-uncommitted transactions see all other changes. */
+    if (txn->isolation == WT_ISO_READ_UNCOMMITTED)
+        return (true);
+
+    RET_MSG(false, "__txn_visible_id: We are read-uncommitted, why are we here?!");
+    // NOTE: We are read-uncommitted and should never do the rest.
+    // /* Otherwise, we should be called with a snapshot. */
+    // WT_ASSERT(session, F_ISSET(txn, WT_TXN_HAS_SNAPSHOT) || session->dhandle->checkpoint != NULL);
+
+    // /*
+    //  * WT_ISO_SNAPSHOT, WT_ISO_READ_COMMITTED: the ID is visible if it is not the result of a
+    //  * concurrent transaction, that is, if was committed before the snapshot was taken.
+    //  *
+    //  * The order here is important: anything newer than the maximum ID we saw when taking the
+    //  * snapshot should be invisible, even if the snapshot is empty.
+    //  */
+    // if (WT_TXNID_LE(txn->snap_max, id))
+    //     return (false);
+    // if (txn->snapshot_count == 0 || WT_TXNID_LT(id, txn->snap_min))
+    //     return (true);
+
+    // WT_BINARY_SEARCH(id, txn->snapshot, txn->snapshot_count, found);
+    // return (!found);
+}
+
+
+/*
+ * __wt_txn_visible --
+ *     Can the current transaction see the given ID / timestamp?
+ */
+static inline bool
+__wt_txn_visible(WT_SESSION_IMPL *session, uint64_t id, wt_timestamp_t timestamp)
+{
+    WT_TXN *txn;
+    WT_TXN_SHARED *txn_shared;
+
+    txn = session->txn;
+    txn_shared = WT_SESSION_TXN_SHARED(session);
+
+    if (!__txn_visible_id(session, id))
+        return (false);
+
+    /* Transactions read their writes, regardless of timestamps. */
+    if (F_ISSET(session->txn, WT_TXN_HAS_ID) && id == session->txn->id)
+        return (true);
+
+    /* Timestamp check. */
+    if (!F_ISSET(txn, WT_TXN_SHARED_TS_READ) || timestamp == WT_TS_NONE)
+        return (true);
+
+    return (timestamp <= txn_shared->read_timestamp);
+}
+
+
+/*
+ * __wt_txn_upd_visible_type --
+ *     Visible type of given update for the current transaction.
+ */
+static inline WT_VISIBLE_TYPE
+__wt_txn_upd_visible_type(WT_SESSION_IMPL *session, WT_UPDATE *upd)
+{
+    uint8_t prepare_state, previous_state;
+    bool upd_visible;
+
+    for (int i = 0; i < 1; i++) {
+        /* Prepare state change is in progress, yield and try again. */
+        WT_ORDERED_READ(prepare_state, upd->prepare_state);
+        if (prepare_state == WT_PREPARE_LOCKED)
+            continue;
+
+        if (WT_IS_HS(S2BT(session)) && upd->txnid != WT_TXN_ABORTED &&
+          upd->type == WT_UPDATE_STANDARD)
+            RET_MSG(-1, "__wt_txn_upd_visible_type: invalid path");
+          // NOTE: Should never enter this!
+            /* Entries in the history store are always visible. */
+            // return (WT_VISIBLE_TRUE);
+
+        upd_visible = __wt_txn_visible(session, upd->txnid, upd->start_ts);
+
+        /*
+         * The visibility check is only valid if the update does not change state. If the state does
+         * change, recheck visibility.
+         */
+        previous_state = prepare_state;
+        WT_ORDERED_READ(prepare_state, upd->prepare_state);
+        if (previous_state == prepare_state)
+            break;
+
+        // WT_STAT_CONN_INCR(session, prepared_transition_blocked_page);
+        RET(WT_VISIBLE_FALSE, "__wt_txn_upd_visible_type: Why did this not immediately succeed?");
+    }
+
+    if (!upd_visible)
+        return (WT_VISIBLE_FALSE);
+
+    if (prepare_state == WT_PREPARE_INPROGRESS)
+        return (WT_VISIBLE_PREPARE);
+
+    return (WT_VISIBLE_TRUE);
+}
+
+/*
+ * __wt_upd_value_assign --
+ *     Point an update value at a given update. We're specifically not getting the value to own the
+ *     memory since this exists in an update list somewhere.
+ */
+static inline void
+__wt_upd_value_assign(WT_UPDATE_VALUE *upd_value, WT_UPDATE *upd)
+{
+    if (!upd_value->skip_buf) {
+        upd_value->buf.data = upd->data;
+        upd_value->buf.size = upd->size;
+    }
+    if (upd->type == WT_UPDATE_TOMBSTONE) {
+        upd_value->tw.durable_stop_ts = upd->durable_ts;
+        upd_value->tw.stop_ts = upd->start_ts;
+        upd_value->tw.stop_txn = upd->txnid;
+        upd_value->tw.prepare =
+          upd->prepare_state == WT_PREPARE_INPROGRESS || upd->prepare_state == WT_PREPARE_LOCKED;
+    } else {
+        upd_value->tw.durable_start_ts = upd->durable_ts;
+        upd_value->tw.start_ts = upd->start_ts;
+        upd_value->tw.start_txn = upd->txnid;
+        upd_value->tw.prepare =
+          upd->prepare_state == WT_PREPARE_INPROGRESS || upd->prepare_state == WT_PREPARE_LOCKED;
+    }
+    upd_value->type = upd->type;
+}
+
+
+/*
+ * __wt_txn_read_upd_list --
+ *     Get the first visible update in a list (or NULL if none are visible).
+ */
+static inline int
+__wt_txn_read_upd_list(
+  WT_SESSION_IMPL *session, WT_CURSOR_BTREE *cbt, WT_UPDATE *upd, WT_UPDATE **prepare_updp)
+{
+    WT_VISIBLE_TYPE upd_visible;
+    uint8_t type;
+
+    if (prepare_updp != NULL)
+        *prepare_updp = NULL;
+    __wt_upd_value_clear(cbt->upd_value);
+
+    for (; upd != NULL; upd = upd->next) {
+        WT_ORDERED_READ(type, upd->type);
+        /* Skip reserved place-holders, they're never visible. */
+        if (type == WT_UPDATE_RESERVE)
+            continue;
+
+        /*
+         * If the cursor is configured to ignore tombstones, copy the timestamps from the tombstones
+         * to the stop time window of the update value being returned to the caller. Caller can
+         * process the stop time window to decide if there was a tombstone on the update chain. If
+         * the time window already has a stop time set then we must've seen a tombstone prior to
+         * ours in the update list, and therefore don't need to do this again.
+         */
+        if (type == WT_UPDATE_TOMBSTONE && F_ISSET(&cbt->iface, WT_CURSTD_IGNORE_TOMBSTONE) &&
+          !WT_TIME_WINDOW_HAS_STOP(&cbt->upd_value->tw)) {
+            cbt->upd_value->tw.durable_stop_ts = upd->durable_ts;
+            cbt->upd_value->tw.stop_ts = upd->start_ts;
+            cbt->upd_value->tw.stop_txn = upd->txnid;
+            cbt->upd_value->tw.prepare = upd->prepare_state == WT_PREPARE_INPROGRESS ||
+              upd->prepare_state == WT_PREPARE_LOCKED;
+            continue;
+        }
+
+        upd_visible = __wt_txn_upd_visible_type(session, upd);
+
+        if (upd_visible == WT_VISIBLE_TRUE)
+            break;
+
+        if (upd_visible == WT_VISIBLE_PREPARE) {
+            /* Ignore the prepared update, if transaction configuration says so. */
+            if (F_ISSET(session->txn, WT_TXN_IGNORE_PREPARE)) {
+                /*
+                 * Save the prepared update to help us detect if we race with prepared commit or
+                 * rollback.
+                 */
+                if (prepare_updp != NULL && *prepare_updp == NULL &&
+                  F_ISSET(upd, WT_UPDATE_PREPARE_RESTORED_FROM_DS))
+                    *prepare_updp = upd;
+                continue;
+            }
+            return (WT_PREPARE_CONFLICT);
+        }
+    }
+
+    if (upd == NULL)
+        return (0);
+
+    /*
+     * Now assign to the update value. If it's not a modify, we're free to simply point the value at
+     * the update's memory without owning it. If it is a modify, we need to reconstruct the full
+     * update now and make the value own the buffer.
+     *
+     * If the caller has specifically asked us to skip assigning the buffer, we shouldn't bother
+     * reconstructing the modify.
+     */
+    if (upd->type != WT_UPDATE_MODIFY || cbt->upd_value->skip_buf)
+        __wt_upd_value_assign(cbt->upd_value, upd);
+    else
+        RET_MSG(-1, "__wt_txn_read_upd_list: Why do we have partial updates?");
+        // NOTE: We should never have partial updates!
+        // WT_RET(__wt_modify_reconstruct_from_upd_list(session, cbt, upd, cbt->upd_value));
+    return (0);
+}
+
+
+/*
+ * __wt_txn_read --
+ *     Get the first visible update in a chain. This function will first check the update list
+ *     supplied as a function argument. If there is no visible update, it will check the onpage
+ *     value for the given key. Finally, if the onpage value is not visible to the reader, the
+ *     function will search the history store for a visible update.
+ */
+static inline int
+__wt_txn_read(WT_SESSION_IMPL *session, WT_CURSOR_BTREE *cbt, WT_ITEM *key, uint64_t recno,
+  WT_UPDATE *upd, WT_CELL_UNPACK_KV *vpack)
+{
+    WT_TIME_WINDOW tw;
+    WT_UPDATE *prepare_upd;
+    bool have_stop_tw;
+    prepare_upd = NULL;
+
+    WT_RET(__wt_txn_read_upd_list(session, cbt, upd, &prepare_upd));
+    if (WT_UPDATE_DATA_VALUE(cbt->upd_value) ||
+      (cbt->upd_value->type == WT_UPDATE_MODIFY && cbt->upd_value->skip_buf))
+        return (0);
+    WT_ASSERT(session, cbt->upd_value->type == WT_UPDATE_INVALID);
+
+    /* If there is no ondisk value, there can't be anything in the history store either. */
+    if (cbt->ref->page->dsk == NULL || cbt->slot == UINT32_MAX) {
+        cbt->upd_value->type = WT_UPDATE_TOMBSTONE;
+        return (0);
+    }
+
+    /*
+     * When we inspected the update list we may have seen a tombstone leaving us with a valid stop
+     * time window, we don't want to overwrite this stop time window.
+     */
+    have_stop_tw = WT_TIME_WINDOW_HAS_STOP(&cbt->upd_value->tw);
+
+    /* Check the ondisk value. */
+    if (vpack == NULL) {
+        WT_TIME_WINDOW_INIT(&tw);
+        WT_RET(__wt_value_return_buf(cbt, cbt->ref, &cbt->upd_value->buf, &tw));
+    } else {
+        WT_TIME_WINDOW_COPY(&tw, &vpack->tw);
+        cbt->upd_value->buf.data = vpack->data;
+        cbt->upd_value->buf.size = vpack->size;
+    }
+
+    /*
+     * If the stop time point is set, that means that there is a tombstone at that time. If it is
+     * not prepared and it is visible to our txn it means we've just spotted a tombstone and should
+     * return "not found", except scanning the history store during rollback to stable and when we
+     * are told to ignore non-globally visible tombstones.
+     */
+    if (!have_stop_tw && __wt_txn_tw_stop_visible(session, &tw) &&
+      !F_ISSET(&cbt->iface, WT_CURSTD_IGNORE_TOMBSTONE)) {
+        cbt->upd_value->buf.data = NULL;
+        cbt->upd_value->buf.size = 0;
+        cbt->upd_value->tw.durable_stop_ts = tw.durable_stop_ts;
+        cbt->upd_value->tw.stop_ts = tw.stop_ts;
+        cbt->upd_value->tw.stop_txn = tw.stop_txn;
+        cbt->upd_value->tw.prepare = tw.prepare;
+        cbt->upd_value->type = WT_UPDATE_TOMBSTONE;
+        return (0);
+    }
+
+    /* Store the stop time pair of the history store record that is returning. */
+    if (!have_stop_tw && WT_TIME_WINDOW_HAS_STOP(&tw) && WT_IS_HS(S2BT(session))) {
+        cbt->upd_value->tw.durable_stop_ts = tw.durable_stop_ts;
+        cbt->upd_value->tw.stop_ts = tw.stop_ts;
+        cbt->upd_value->tw.stop_txn = tw.stop_txn;
+        cbt->upd_value->tw.prepare = tw.prepare;
+    }
+
+    /* If the start time point is visible then we need to return the ondisk value. */
+    if (WT_IS_HS(S2BT(session)) || __wt_txn_tw_start_visible(session, &tw)) {
+        if (cbt->upd_value->skip_buf) {
+            cbt->upd_value->buf.data = NULL;
+            cbt->upd_value->buf.size = 0;
+        }
+        cbt->upd_value->tw.durable_start_ts = tw.durable_start_ts;
+        cbt->upd_value->tw.start_ts = tw.start_ts;
+        cbt->upd_value->tw.start_txn = tw.start_txn;
+        cbt->upd_value->tw.prepare = tw.prepare;
+        cbt->upd_value->type = WT_UPDATE_STANDARD;
+        return (0);
+    }
+
+    /* If there's no visible update in the update chain or ondisk, check the history store file. */
+    if (F_ISSET(S2C(session), WT_CONN_HS_OPEN) && !F_ISSET(S2BT(session), WT_BTREE_HS))
+        WT_RET_NOTFOUND_OK(__wt_hs_find_upd(session, key, cbt->iface.value_format, recno,
+          cbt->upd_value, false, &cbt->upd_value->buf));
+
+    /*
+     * Retry if we race with prepared commit or rollback. If we race with prepared rollback, the
+     * value the reader should read may have been removed from the history store and appended to the
+     * data store. If we race with prepared commit, imagine a case we read with timestamp 50 and we
+     * have a prepared update with timestamp 30 and a history store record with timestamp 20,
+     * committing the prepared update will cause the stop timestamp of the history store record
+     * being updated to 30 and the reader not seeing it.
+     */
+    if (prepare_upd != NULL) {
+        WT_ASSERT(session, F_ISSET(prepare_upd, WT_UPDATE_PREPARE_RESTORED_FROM_DS));
+        if (prepare_upd->txnid == WT_TXN_ABORTED ||
+          prepare_upd->prepare_state == WT_PREPARE_RESOLVED)
+            return (WT_RESTART);
+    }
+
+    /* Return invalid not tombstone if nothing is found in history store. */
+    WT_ASSERT(session, cbt->upd_value->type != WT_UPDATE_TOMBSTONE);
+    return (0);
+}
+
+
+
+/*
+ * __wt_cursor_valid --
+ *     Return if the cursor references an valid key/value pair.
+ */
+int
+__wt_cursor_valid(WT_CURSOR_BTREE *cbt, WT_ITEM *key, uint64_t recno, bool *valid)
+{
+    WT_BTREE *btree;
+    WT_CELL *cell;
+    WT_COL *cip;
+    WT_PAGE *page;
+    WT_SESSION_IMPL *session;
+
+    *valid = false;
+
+    btree = CUR2BT(cbt);
+    page = cbt->ref->page;
+    session = CUR2S(cbt);
+
+    /*
+     * We may be pointing to an insert object, and we may have a page with
+     * existing entries.  Insert objects always have associated update
+     * objects (the value).  Any update object may be deleted, or invisible
+     * to us.  In the case of an on-page entry, there is by definition a
+     * value that is visible to us, the original page cell.
+     *
+     * If we find a visible update structure, return our caller a reference
+     * to it because we don't want to repeatedly search for the update, it
+     * might suddenly become invisible (imagine a read-uncommitted session
+     * with another session's aborted insert), and we don't want to handle
+     * that potential error every time we look at the value.
+     *
+     * Unfortunately, the objects we might have and their relationships are
+     * different for the underlying page types.
+     *
+     * In the case of row-store, an insert object implies ignoring any page
+     * objects, no insert object can have the same key as an on-page object.
+     * For row-store:
+     *	if there's an insert object:
+     *		if there's a visible update:
+     *			exact match
+     *		else
+     *			no exact match
+     *	else
+     *		use the on-page object (which may have an associated
+     *		update object that may or may not be visible to us).
+     *
+     * Column-store is more complicated because an insert object can have
+     * the same key as an on-page object: updates to column-store rows
+     * are insert/object pairs, and an invisible update isn't the end as
+     * there may be an on-page object that is visible.  This changes the
+     * logic to:
+     *	if there's an insert object:
+     *		if there's a visible update:
+     *			exact match
+     *		else if the on-page object's key matches the insert key
+     *			use the on-page object
+     *	else
+     *		use the on-page object
+     *
+     * First, check for an insert object with a visible update (a visible
+     * update that's been deleted is not a valid key/value pair).
+     */
+    // TODO: Add skiplist support
+    if (cbt->ins != NULL) {
+        RET_MSG(-1, "__wt_cursor_valid: Skiplist support not added yet!");
+        // WT_RET(__wt_txn_read_upd_list(session, cbt, cbt->ins->upd, NULL));
+        // if (cbt->upd_value->type != WT_UPDATE_INVALID) {
+        //     if (cbt->upd_value->type == WT_UPDATE_TOMBSTONE)
+        //         return (0);
+        //     *valid = true;
+        //     return (0);
+        // }
+    }
+
+    /*
+     * Clean out any stale value here. Calling a transaction read helper automatically clears this
+     * but we have some code paths that don't do this (fixed length column store is one example).
+     */
+    __wt_upd_value_clear(cbt->upd_value);
+
+    /*
+     * If we don't have an insert object, or in the case of column-store, there's an insert object
+     * but no update was visible to us and the key on the page is the same as the insert object's
+     * key, and the slot as set by the search function is valid, we can use the original page
+     * information.
+     */
+    switch (btree->type) {
+    case BTREE_COL_FIX:
+        // NOTE: Bloom filters not yet implemented.
+        RET_MSG(-1, "__wt_cursor_valid: Bloom filters not yet implemented");
+        /*
+         * If search returned an insert object, there may or may not be a matching on-page object,
+         * we have to check. Fixed-length column-store pages don't have slots, but map one-to-one to
+         * keys, check for retrieval past the end of the page.
+         */
+        if (cbt->recno >= cbt->ref->ref_recno + page->entries)
+            return (0);
+
+        *valid = true;
+        /*
+         * An update would have appeared as an "insert" object; no further checks to do.
+         */
+        break;
+    case BTREE_COL_VAR:
+        // NOTE: We'll never enter this!
+        RET_MSG(-1, "__wt_cursor_valid: BTREE_COL_VAR path!");
+
+        // /* The search function doesn't check for empty pages. */
+        // if (page->entries == 0)
+        //     return (0);
+        // /*
+        //  * In case of prepare conflict, the slot might not have a valid value, if the update in the
+        //  * insert list of a new page scanned is in prepared state.
+        //  */
+        // // WT_ASSERT(session, cbt->slot == UINT32_MAX || cbt->slot < page->entries);
+
+        // /*
+        //  * Column-store updates are stored as "insert" objects. If search returned an insert object
+        //  * we can't return, the returned on-page object must be checked for a match.
+        //  */
+        // if (cbt->ins != NULL && !F_ISSET(cbt, WT_CBT_VAR_ONPAGE_MATCH))
+        //     return (0);
+
+        // /*
+        //  * Although updates would have appeared as an "insert" objects, variable-length column store
+        //  * deletes are written into the backing store; check the cell for a record already deleted
+        //  * when read.
+        //  */
+        // cip = &page->pg_var[cbt->slot];
+        // cell = WT_COL_PTR(page, cip);
+        // if (__wt_cell_type(cell) == WT_CELL_DEL)
+        //     return (0);
+
+        // /*
+        //  * Check for an update ondisk or in the history store. For column store, an insert object
+        //  * can have the same key as an on-page or history store object.
+        //  */
+        // WT_RET(__wt_txn_read(session, cbt, key, recno, NULL, NULL));
+        // if (cbt->upd_value->type != WT_UPDATE_INVALID) {
+        //     if (cbt->upd_value->type == WT_UPDATE_TOMBSTONE)
+        //         return (0);
+        //     *valid = true;
+        // }
+        break;
+    case BTREE_ROW:
+        /* The search function doesn't check for empty pages. */
+        if (page->entries == 0)
+            return (0);
+        /*
+         * In case of prepare conflict, the slot might not have a valid value, if the update in the
+         * insert list of a new page scanned is in prepared state.
+         */
+        // WT_ASSERT(session, cbt->slot == UINT32_MAX || cbt->slot < page->entries);
+
+        /*
+         * See above: for row-store, no insert object can have the same key as an on-page object,
+         * we're done.
+         */
+        // TODO: Skiplist support
+        if (cbt->ins != NULL) RET_MSG(-1, "__wt_cursor_valid")
+            // return (0);
+
+        /* Check for an update. */
+        WT_RET(__wt_txn_read(session, cbt, key, WT_RECNO_OOB,
+          (page->modify != NULL && page->modify->mod_row_update != NULL) ?
+            page->modify->mod_row_update[cbt->slot] :
+            NULL,
+          NULL));
+        if (cbt->upd_value->type != WT_UPDATE_INVALID) {
+            if (cbt->upd_value->type == WT_UPDATE_TOMBSTONE)
+                return (0);
+            *valid = true;
+        }
+        break;
+    }
+    return (0);
+}
+
+
+
+/*
+ * __cursor_fix_implicit --
+ *     Return if search went past the end of the tree.
+ */
+static inline bool
+__cursor_fix_implicit(WT_BTREE *btree, WT_CURSOR_BTREE *cbt)
+{
+    /*
+     * When there's no exact match, column-store search returns the key nearest the searched-for key
+     * (continuing past keys smaller than the searched-for key to return the next-largest key).
+     * Therefore, if the returned comparison is -1, the searched-for key was larger than any row on
+     * the page's standard information or column-store insert list.
+     *
+     * If the returned comparison is NOT -1, there was a row equal to or larger than the
+     * searched-for key, and we implicitly create missing rows.
+     */
+    return (btree->type == BTREE_COL_FIX && cbt->compare != -1);
+}
+
+
+/*
+ * __cursor_kv_return --
+ *     Return a page referenced key/value pair to the application.
+ */
+static inline int
+__cursor_kv_return(WT_CURSOR_BTREE *cbt, WT_UPDATE_VALUE *upd_value)
+{
+    WT_RET(__wt_key_return(cbt));
+    WT_RET(__wt_value_return(cbt, upd_value));
+
+    return (0);
+}
+
+
+/*
  * __wt_cursor_kv_not_set --
  *     Standard error message for key/values not set.
  */
