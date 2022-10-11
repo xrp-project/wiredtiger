@@ -63,6 +63,17 @@
         "compact.h": "c",
         "btree.h": "c",
         "lsm.h": "c",
-        "log.h": "c"
+        "log.h": "c",
+        "types.h": "c",
+        "pthread.h": "c",
+        "stdint.h": "c",
+        "stdarg.h": "c",
+        "api.h": "c",
+        "misc.h": "c",
+        "cctype": "c",
+        "txn.h": "c",
+        "capacity.h": "c",
+        "cache.h": "c",
+        "wt_internal.h": "c"
     }
 }

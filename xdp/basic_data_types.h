@@ -2,6 +2,8 @@
 // Ints //
 //////////
 
+#ifndef	_STDLIB_H
+
 typedef signed char int8_t;
 typedef short int16_t;
 typedef long int32_t;
@@ -37,11 +39,7 @@ typedef unsigned long int	uintptr_t;
 # define UINT32_MAX		(4294967295U)
 # define UINT64_MAX		(__UINT64_C(18446744073709551615))
 
-////////////
-// Errors //
-////////////
-
-#define EINVAL 22
+typedef unsigned long int pthread_t;
 
 //////////
 // Time //
@@ -71,6 +69,16 @@ struct timespec
 #endif
 };
 
+#endif  // -- _STDLIB_H
+
+////////////
+// Errors //
+////////////
+
+#define EINVAL 22
+#define ENOTSUP 95
+
+
 /////////////////
 // Concurrency //
 /////////////////
@@ -94,3 +102,8 @@ struct wt_cond_t_stub {
 typedef struct __wt_spinlock_stub WT_SPINLOCK;
 typedef struct __wt_mutex_stub wt_mutex_t;
 typedef struct wt_cond_t_stub wt_cond_t;
+
+typedef struct {
+    bool created;
+    pthread_t id;
+} wt_thread_t;

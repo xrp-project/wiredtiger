@@ -519,8 +519,8 @@ struct __wt_connection_impl {
     uint64_t timing_stress_flags;
 
 #define WT_STDERR(s) (&S2C(s)->wt_stderr)
-#define WT_STDOUT(s) (&S2C(s)->wt_stdout)
-    WT_FSTREAM wt_stderr, wt_stdout;
+// #define WT_STDOUT(s) (&S2C(s)->wt_stdout)
+//     WT_FSTREAM wt_stderr, wt_stdout;
 
     /*
      * File system interface abstracted to support alternative file system implementations.

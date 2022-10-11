@@ -41,6 +41,15 @@
     (s)->dhandle = __olddh; \
     (s)->name = __oldname
 
+#define __wt_op_timer_start(s)
+
+#define __wt_verbose(arg1, arg2, arg3, arg4) \
+    WT_UNUSED(arg1); \
+    WT_UNUSED(arg2); \
+    WT_UNUSED(arg3); \
+    WT_UNUSED(arg4)
+
+
 /* Standard entry points to the API: declares/initializes local variables. */
 #define API_SESSION_INIT(s, h, n, dh)                              \
     WT_TRACK_OP_DECL;                                              \
@@ -68,6 +77,11 @@
         API_SESSION_INIT(s, h, n, dh);                                    \
         if ((config) != NULL)                                             \
     WT_ERR(__wt_config_check((s), WT_CONFIG_REF(session, h##_##n), (config), 0))
+
+
+static inline void __wt_txn_err_set(WT_SESSION_IMPL *session, int ret);
+
+#define __wt_op_timer_stop(s)
 
 #define API_END(s, ret)                                      \
     if ((s) != NULL) {                                       \

@@ -8,6 +8,12 @@
 
 #include <pthread.h>
 #include <stdlib.h>
+#include <stdio.h>
+#include <stdint.h>
+#include <stdbool.h>
+#include <string.h>
+#include <ctype.h>
+
 
 ///////////////////////////////////////////////////////////
 // Wiredtiger helper functions and macros, ported to BPF //
@@ -15,9 +21,6 @@
 #include "wiredtiger_internal.h"
 
 // TODO: Include session implementation
-
-#define bpf_printk(fmt, ...) printf(fmt, __VA_ARGS__)
-
 
 // include/cursor.i
 
@@ -45,47 +48,6 @@ __cursor_leave(WT_SESSION_IMPL *session)
     for ((i) = (clsm)->nchunks; (i) > 0;) \
         if (((c) = (clsm)->chunks[--(i)]->cursor) != NULL)
 
-// Misc
-
-#define __wt_err(session, error, ...) bpf_printk(__VA__ARGS)
-
-#define WT_RET(a)               \
-    do {                        \
-        int __ret;              \
-        if ((__ret = (a)) != 0) \
-            return (__ret);     \
-    } while (0)
-
-#define WT_RET_MSG(session, v, ...)            \
-    do {                                       \
-        int __ret = (v);                       \
-        __wt_err(session, __ret, __VA_ARGS__); \
-        return (__ret);                        \
-    } while (0)
-
-#define WT_ERR(a)             \
-    do {                      \
-        if ((ret = (a)) != 0) \
-            goto err;         \
-    } while (0)
-
-#define WT_ERR_MSG(session, v, ...)          \
-    do {                                     \
-        ret = (v);                           \
-        printf("Return code: %d", ret);      \
-        printf(__VA__ARGS__);                \
-        goto err;                            \
-    } while (0)
-
-
-#define RET_MSG(ret, ...)               \
-    do {                                \
-        int __ret = (ret);              \
-        fprintf("Error code: %d", ret); \
-        fprintf(__VA__ARGS__);          \
-        fprintf("\n");                  \
-        return (__ret);                 \
-    } while (0)
 
 static inline int
 __wt_txn_context_prepare_check(WT_SESSION_IMPL *session)
@@ -117,6 +79,201 @@ static inline void
 __cursor_novalue(WT_CURSOR *cursor)
 {
     F_CLR(cursor, WT_CURSTD_VALUE_INT);
+}
+
+
+/*
+ * __wt_row_leaf_key_info --
+ *     Return a row-store leaf page key referenced by a WT_ROW if it can be had without unpacking a
+ *     cell, and information about the cell, if the key isn't cheaply available.
+ */
+static inline bool
+__wt_row_leaf_key_info(
+  WT_PAGE *page, void *copy, WT_IKEY **ikeyp, WT_CELL **cellp, void *datap, size_t *sizep)
+{
+    WT_IKEY *ikey;
+    uintptr_t v;
+
+    v = (uintptr_t)copy;
+
+/*
+ * A row-store leaf page key is in one of two places: if instantiated,
+ * the WT_ROW pointer references a WT_IKEY structure, otherwise, it
+ * references an on-page offset.  Further, on-page keys are in one of
+ * two states: if the key is a simple key (not an overflow key, prefix
+ * compressed or Huffman encoded, all of which are likely), the key's
+ * offset/size is encoded in the pointer.  Otherwise, the offset is to
+ * the key's on-page cell.
+ *
+ * Now the magic: allocated memory must be aligned to store any standard
+ * type, and we expect some standard type to require at least quad-byte
+ * alignment, so allocated memory should have some clear low-order bits.
+ * On-page objects consist of an offset/length pair: the maximum page
+ * size currently fits into 29 bits, so we use the low-order bits of the
+ * pointer to mark the other bits of the pointer as encoding the key's
+ * location and length.  This breaks if allocated memory isn't aligned,
+ * of course.
+ *
+ * In this specific case, we use bit 0x01 to mark an on-page cell, bit
+ * 0x02 to mark an on-page key, 0x03 to mark an on-page key/value pair,
+ * otherwise it's a WT_IKEY reference. The bit pattern for on-page cells
+ * is:
+ *	29 bits		page offset of the key's cell,
+ *	 2 bits		flags
+ *
+ * The bit pattern for on-page keys is:
+ *	32 bits		key length,
+ *	29 bits		page offset of the key's bytes,
+ *	 2 bits		flags
+ *
+ * But, while that allows us to skip decoding simple key cells, we also
+ * want to skip decoding the value cell in the case where the value cell
+ * is also simple/short.  We use bit 0x03 to mark an encoded on-page key
+ * and value pair.  The bit pattern for on-page key/value pairs is:
+ *	 9 bits		key length,
+ *	13 bits		value length,
+ *	20 bits		page offset of the key's bytes,
+ *	20 bits		page offset of the value's bytes,
+ *	 2 bits		flags
+ *
+ * These bit patterns are in-memory only, of course, so can be modified
+ * (we could even tune for specific workloads).  Generally, the fields
+ * are larger than the anticipated values being stored (512B keys, 8KB
+ * values, 1MB pages), hopefully that won't be necessary.
+ *
+ * This function returns a list of things about the key (instantiation
+ * reference, cell reference and key/length pair).  Our callers know
+ * the order in which we look things up and the information returned;
+ * for example, the cell will never be returned if we are working with
+ * an on-page key.
+ */
+#define WT_CELL_FLAG 0x01
+#define WT_CELL_ENCODE_OFFSET(v) ((uintptr_t)(v) << 2)
+#define WT_CELL_DECODE_OFFSET(v) (((v)&0xFFFFFFFF) >> 2)
+
+#define WT_K_FLAG 0x02
+#define WT_K_ENCODE_KEY_LEN(v) ((uintptr_t)(v) << 32)
+#define WT_K_DECODE_KEY_LEN(v) ((v) >> 32)
+#define WT_K_ENCODE_KEY_OFFSET(v) ((uintptr_t)(v) << 2)
+#define WT_K_DECODE_KEY_OFFSET(v) (((v)&0xFFFFFFFF) >> 2)
+
+#define WT_KV_FLAG 0x03
+#define WT_KV_ENCODE_KEY_LEN(v) ((uintptr_t)(v) << 55)
+#define WT_KV_DECODE_KEY_LEN(v) ((v) >> 55)
+#define WT_KV_MAX_KEY_LEN (0x200 - 1)
+#define WT_KV_ENCODE_VALUE_LEN(v) ((uintptr_t)(v) << 42)
+#define WT_KV_DECODE_VALUE_LEN(v) (((v)&0x007FFC0000000000) >> 42)
+#define WT_KV_MAX_VALUE_LEN (0x2000 - 1)
+#define WT_KV_ENCODE_KEY_OFFSET(v) ((uintptr_t)(v) << 22)
+#define WT_KV_DECODE_KEY_OFFSET(v) (((v)&0x000003FFFFC00000) >> 22)
+#define WT_KV_MAX_KEY_OFFSET (0x100000 - 1)
+#define WT_KV_ENCODE_VALUE_OFFSET(v) ((uintptr_t)(v) << 2)
+#define WT_KV_DECODE_VALUE_OFFSET(v) (((v)&0x00000000003FFFFC) >> 2)
+#define WT_KV_MAX_VALUE_OFFSET (0x100000 - 1)
+    switch (v & 0x03) {
+    case WT_CELL_FLAG:
+        /* On-page cell: no instantiated key. */
+        if (ikeyp != NULL)
+            *ikeyp = NULL;
+        if (cellp != NULL)
+            *cellp = WT_PAGE_REF_OFFSET(page, WT_CELL_DECODE_OFFSET(v));
+        return (false);
+    case WT_K_FLAG:
+        /* Encoded key: no instantiated key, no cell. */
+        if (cellp != NULL)
+            *cellp = NULL;
+        if (ikeyp != NULL)
+            *ikeyp = NULL;
+        if (datap != NULL) {
+            *(void **)datap = WT_PAGE_REF_OFFSET(page, WT_K_DECODE_KEY_OFFSET(v));
+            *sizep = WT_K_DECODE_KEY_LEN(v);
+            return (true);
+        }
+        return (false);
+    case WT_KV_FLAG:
+        /* Encoded key/value pair: no instantiated key, no cell. */
+        if (cellp != NULL)
+            *cellp = NULL;
+        if (ikeyp != NULL)
+            *ikeyp = NULL;
+        if (datap != NULL) {
+            *(void **)datap = WT_PAGE_REF_OFFSET(page, WT_KV_DECODE_KEY_OFFSET(v));
+            *sizep = WT_KV_DECODE_KEY_LEN(v);
+            return (true);
+        }
+        return (false);
+    }
+
+    /* Instantiated key. */
+    ikey = copy;
+    if (ikeyp != NULL)
+        *ikeyp = copy;
+    if (cellp != NULL)
+        *cellp = WT_PAGE_REF_OFFSET(page, ikey->cell_offset);
+    if (datap != NULL) {
+        *(void **)datap = WT_IKEY_DATA(ikey);
+        *sizep = ikey->size;
+        return (true);
+    }
+    return (false);
+}
+
+/*
+ * __wt_row_leaf_value --
+ *     Return the value for a row-store leaf page encoded key/value pair.
+ */
+static inline bool
+__wt_row_leaf_value(WT_PAGE *page, WT_ROW *rip, WT_ITEM *value)
+{
+    uintptr_t v;
+
+    /* The row-store key can change underfoot; explicitly take a copy. */
+    v = (uintptr_t)WT_ROW_KEY_COPY(rip);
+
+    /*
+     * See the comment in __wt_row_leaf_key_info for an explanation of the magic.
+     */
+    if ((v & 0x03) == WT_KV_FLAG) {
+        value->data = WT_PAGE_REF_OFFSET(page, WT_KV_DECODE_VALUE_OFFSET(v));
+        value->size = WT_KV_DECODE_VALUE_LEN(v);
+        return (true);
+    }
+    return (false);
+}
+
+
+/*
+ * __wt_row_leaf_key --
+ *     Set a buffer to reference a row-store leaf page key as cheaply as possible.
+ */
+static inline int
+__wt_row_leaf_key(
+  WT_SESSION_IMPL *session, WT_PAGE *page, WT_ROW *rip, WT_ITEM *key, bool instantiate)
+{
+    void *copy;
+
+    /*
+     * A front-end for __wt_row_leaf_key_work, here to inline fast paths.
+     *
+     * The row-store key can change underfoot; explicitly take a copy.
+     */
+    copy = WT_ROW_KEY_COPY(rip);
+
+    /*
+     * All we handle here are on-page keys (which should be a common case), and instantiated keys
+     * (which start out rare, but become more common as a leaf page is searched, instantiating
+     * prefix-compressed keys).
+     */
+    if (__wt_row_leaf_key_info(page, copy, NULL, NULL, &key->data, &key->size))
+        return (0);
+
+    /*
+     * The alternative is an on-page cell with some kind of compressed or overflow key that's never
+     * been instantiated. Call the underlying worker function to figure it out.
+     */
+    // NOTE: We don't use prefix compression!
+    RET_MSG(-1, "__wt_row_leaf_key: Prefix compression path entered!");
+    // return (__wt_row_leaf_key_work(session, page, rip, key, instantiate));
 }
 
 /*
@@ -209,52 +366,6 @@ __wt_key_return(WT_CURSOR_BTREE *cbt)
 }
 
 /*
- * __wt_row_leaf_value --
- *     Return the value for a row-store leaf page encoded key/value pair.
- */
-static inline bool
-__wt_row_leaf_value(WT_PAGE *page, WT_ROW *rip, WT_ITEM *value)
-{
-    uintptr_t v;
-
-    /* The row-store key can change underfoot; explicitly take a copy. */
-    v = (uintptr_t)WT_ROW_KEY_COPY(rip);
-
-    /*
-     * See the comment in __wt_row_leaf_key_info for an explanation of the magic.
-     */
-    if ((v & 0x03) == WT_KV_FLAG) {
-        value->data = WT_PAGE_REF_OFFSET(page, WT_KV_DECODE_VALUE_OFFSET(v));
-        value->size = WT_KV_DECODE_VALUE_LEN(v);
-        return (true);
-    }
-    return (false);
-}
-
-/*
- * __wt_row_leaf_value --
- *     Return the value for a row-store leaf page encoded key/value pair.
- */
-static inline bool
-__wt_row_leaf_value(WT_PAGE *page, WT_ROW *rip, WT_ITEM *value)
-{
-    uintptr_t v;
-
-    /* The row-store key can change underfoot; explicitly take a copy. */
-    v = (uintptr_t)WT_ROW_KEY_COPY(rip);
-
-    /*
-     * See the comment in __wt_row_leaf_key_info for an explanation of the magic.
-     */
-    if ((v & 0x03) == WT_KV_FLAG) {
-        value->data = WT_PAGE_REF_OFFSET(page, WT_KV_DECODE_VALUE_OFFSET(v));
-        value->size = WT_KV_DECODE_VALUE_LEN(v);
-        return (true);
-    }
-    return (false);
-}
-
-/*
  * __wt_buf_grow_worker --
  *     Grow a buffer that may be in-use, and ensure that all data is local to the buffer.
  */
@@ -334,6 +445,98 @@ __wt_buf_set(WT_SESSION_IMPL *session, WT_ITEM *buf, const void *data, size_t si
     return (__wt_buf_grow(session, buf, size));
 }
 
+/* byte of the bitstring bit is in */
+#define	__bit_byte(bit)	((bit) >> 3)
+
+/* mask for the bit within its byte */
+#define	__bit_mask(bit)	(1 << ((bit) & 0x7))
+
+
+/*
+ * __bit_test --
+ *	Test one bit in name.
+ */
+static inline bool
+__bit_test(uint8_t *bitf, uint64_t bit)
+{
+	return ((bitf[__bit_byte(bit)] & __bit_mask(bit)) != 0);
+}
+
+/*
+ * __bit_getv --
+ *	Return a fixed-length column store bit-field value.
+ */
+static inline uint8_t
+__bit_getv(uint8_t *bitf, uint64_t entry, uint8_t width)
+{
+	uint64_t bit;
+	uint8_t value;
+
+	value = 0;
+	bit = entry * width;
+
+	/*
+	 * Fast-path single bytes, do repeated tests for the rest: we could
+	 * slice-and-dice instead, but the compiler is probably going to do
+	 * a better job than I will.
+	 *
+	 * The Berkeley version of this file uses a #define to compress this
+	 * case statement. This code expands the case statement because gcc7
+	 * complains about implicit fallthrough and doesn't support explicit
+	 * fallthrough comments in macros.
+	 */
+	switch (width) {
+	case 8:
+		return (bitf[__bit_byte(bit)]);
+	case 7:
+		if (__bit_test(bitf, bit))
+			value |= 0x40;
+		++bit;
+		/* FALLTHROUGH */
+	case 6:
+		if (__bit_test(bitf, bit))
+			value |= 0x20;
+		++bit;
+		/* FALLTHROUGH */
+	case 5:
+		if (__bit_test(bitf, bit))
+			value |= 0x10;
+		++bit;
+		/* FALLTHROUGH */
+	case 4:
+		if (__bit_test(bitf, bit))
+			value |= 0x08;
+		++bit;
+		/* FALLTHROUGH */
+	case 3:
+		if (__bit_test(bitf, bit))
+			value |= 0x04;
+		++bit;
+		/* FALLTHROUGH */
+	case 2:
+		if (__bit_test(bitf, bit))
+			value |= 0x02;
+		++bit;
+		/* FALLTHROUGH */
+	case 1:
+		if (__bit_test(bitf, bit))
+			value |= 0x01;
+		++bit;
+		break;
+	}
+	return (value);
+}
+
+/*
+ * __bit_getv_recno --
+ *	Return a record number's bit-field value.
+ */
+static inline uint8_t
+__bit_getv_recno(WT_REF *ref, uint64_t recno, uint8_t width)
+{
+	return (__bit_getv(
+	    ref->page->pg_fix_bitf, recno - ref->ref_recno, width));
+}
 
 /*
  * __wt_value_return_buf --
@@ -343,7 +546,7 @@ int
 __wt_value_return_buf(WT_CURSOR_BTREE *cbt, WT_REF *ref, WT_ITEM *buf, WT_TIME_WINDOW *tw)
 {
     WT_BTREE *btree;
-    WT_CELL *cell;
+    // WT_CELL *cell;
     // WT_CELL_UNPACK_KV unpack;
     WT_CURSOR *cursor;
     WT_PAGE *page;
@@ -503,7 +706,7 @@ static inline bool
 __txn_visible_id(WT_SESSION_IMPL *session, uint64_t id)
 {
     WT_TXN *txn;
-    bool found;
+    // bool found;
 
     txn = session->txn;
 
@@ -608,7 +811,7 @@ __wt_txn_upd_visible_type(WT_SESSION_IMPL *session, WT_UPDATE *upd)
             break;
 
         // WT_STAT_CONN_INCR(session, prepared_transition_blocked_page);
-        RET(WT_VISIBLE_FALSE, "__wt_txn_upd_visible_type: Why did this not immediately succeed?");
+        RET_MSG(WT_VISIBLE_FALSE, "__wt_txn_upd_visible_type: Why did this not immediately succeed?");
     }
 
     if (!upd_visible)
@@ -730,6 +933,29 @@ __wt_txn_read_upd_list(
 
 
 /*
+ * __wt_txn_tw_stop_visible --
+ *     Is the given stop time window visible?
+ */
+static inline bool
+__wt_txn_tw_stop_visible(WT_SESSION_IMPL *session, WT_TIME_WINDOW *tw)
+{
+    return (WT_TIME_WINDOW_HAS_STOP(tw) && !tw->prepare &&
+      __wt_txn_visible(session, tw->stop_txn, tw->stop_ts));
+}
+
+/*
+ * __wt_txn_tw_start_visible --
+ *     Is the given start time window visible?
+ */
+static inline bool
+__wt_txn_tw_start_visible(WT_SESSION_IMPL *session, WT_TIME_WINDOW *tw)
+{
+    return ((WT_TIME_WINDOW_HAS_STOP(tw) || !tw->prepare) &&
+      __wt_txn_visible(session, tw->start_txn, tw->start_ts));
+}
+
+
+/*
  * __wt_txn_read --
  *     Get the first visible update in a chain. This function will first check the update list
  *     supplied as a function argument. If there is no visible update, it will check the onpage
@@ -815,8 +1041,8 @@ __wt_txn_read(WT_SESSION_IMPL *session, WT_CURSOR_BTREE *cbt, WT_ITEM *key, uint
 
     /* If there's no visible update in the update chain or ondisk, check the history store file. */
     if (F_ISSET(S2C(session), WT_CONN_HS_OPEN) && !F_ISSET(S2BT(session), WT_BTREE_HS))
-        WT_RET_NOTFOUND_OK(__wt_hs_find_upd(session, key, cbt->iface.value_format, recno,
-          cbt->upd_value, false, &cbt->upd_value->buf));
+        RET_MSG(-1, "__wt_txn_read: Why are we visiting the history store?");
+        // WT_RET_NOTFOUND_OK(__wt_hs_find_upd(session, key, cbt->iface.value_format, recno, cbt->upd_value, false, &cbt->upd_value->buf));
 
     /*
      * Retry if we race with prepared commit or rollback. If we race with prepared rollback, the
@@ -848,8 +1074,8 @@ int
 __wt_cursor_valid(WT_CURSOR_BTREE *cbt, WT_ITEM *key, uint64_t recno, bool *valid)
 {
     WT_BTREE *btree;
-    WT_CELL *cell;
-    WT_COL *cip;
+    // WT_CELL *cell;
+    // WT_COL *cip;
     WT_PAGE *page;
     WT_SESSION_IMPL *session;
 
@@ -1000,7 +1226,7 @@ __wt_cursor_valid(WT_CURSOR_BTREE *cbt, WT_ITEM *key, uint64_t recno, bool *vali
          * we're done.
          */
         // TODO: Skiplist support
-        if (cbt->ins != NULL) RET_MSG(-1, "__wt_cursor_valid")
+        if (cbt->ins != NULL) RET_MSG(-1, "__wt_cursor_valid");
             // return (0);
 
         /* Check for an update. */
@@ -1071,6 +1297,16 @@ __wt_cursor_kv_not_set(WT_CURSOR *cursor, bool key) WT_GCC_FUNC_ATTRIBUTE((cold)
 }
 
 /*
+ * __wt_isdigit --
+ *     Wrap the ctype function without sign extension.
+ */
+static inline bool
+__wt_isdigit(u_char c)
+{
+    return (isdigit(c) != 0);
+}
+
+/*
  * __wt_cursor_get_valuev --
  *     WT_CURSOR->get_value worker implementation.
  */
@@ -1103,6 +1339,7 @@ __wt_cursor_get_valuev(WT_CURSOR *cursor, va_list ap)
     else if (WT_STREQ(fmt, "t") || (__wt_isdigit((u_char)fmt[0]) && WT_STREQ(fmt + 1, "t")))
         *va_arg(ap, uint8_t *) = *(uint8_t *)cursor->value.data;
     else
+        RET_MSG(-1, "__wt_cursor_get_valuev: This should never happen!");
         // NOTE: This should never happen!
         // ret = __wt_struct_unpackv(session, cursor->value.data, cursor->value.size, fmt, ap);
 err:
@@ -1282,7 +1519,7 @@ err:
      */
     if (tmp.mem != NULL) {
         // We should never enter here!
-        RET_MSG(-1 "__wt_cursor_set_keyv: tmp.mem != NULL");
+        RET_MSG(-1, "__wt_cursor_set_keyv: tmp.mem != NULL");
     //     if (buf->mem == NULL && !FLD_ISSET(S2C(session)->debug_flags, WT_CONN_DEBUG_CURSOR_COPY)) {
     //         buf->mem = tmp.mem;
     //         buf->memsize = tmp.memsize;
@@ -1290,6 +1527,7 @@ err:
     //     } else
     //         __wt_free(session, tmp.mem);
     }
+    return ret;
     // API_END_RET(session, ret);
 }
 
@@ -1412,18 +1650,6 @@ __cursor_localkey(WT_CURSOR *cursor)
         // F_SET(cursor, WT_CURSTD_KEY_EXT);
     }
     return (0);
-}
-
-/*
- * __cursor_leave --
- *     Deactivate a cursor.
- */
-static inline void
-__cursor_leave(WT_SESSION_IMPL *session)
-{
-    /* Decrement the count of active cursors in the session. */
-    WT_ASSERT(session, session->ncursors > 0);
-    --session->ncursors;
 }
 
 /*
@@ -1797,10 +2023,12 @@ __wt_txn_cursor_op(WT_SESSION_IMPL *session)
             txn_shared->pinned_id = txn_global->last_running;
         if (txn_shared->metadata_pinned == WT_TXN_NONE)
             txn_shared->metadata_pinned = txn_shared->pinned_id;
-    } else if (!F_ISSET(txn, WT_TXN_HAS_SNAPSHOT))
+    } else if (!F_ISSET(txn, WT_TXN_HAS_SNAPSHOT)) {
         // NOTE: This should never happen
-        RET_MSG(-1, "__wt_txn_cursor_op: requested snapshot");
+        printf("__wt_txn_cursor_op: requested snapshot not expected!\n");
+        return;
         // __wt_txn_get_snapshot(session);
+    }
 }
 
 
@@ -1903,21 +2131,122 @@ __wt_session_gen_leave(WT_SESSION_IMPL *session, int which)
     WT_FULL_BARRIER();
 }
 
-/*
- * __cursor_row_search --
- *     Row-store search from a cursor.
- */
-static inline int
-__cursor_row_search(WT_CURSOR_BTREE *cbt, bool insert, WT_REF *leaf, bool *leaf_foundp)
-{
-    WT_DECL_RET;
-    WT_SESSION_IMPL *session;
 
-    session = CUR2S(cbt);
-    WT_WITH_PAGE_INDEX(
-      session, ret = __wt_row_search(cbt, &cbt->iface.key, insert, leaf, false, leaf_foundp));
-    return (ret);
+/*
+ * __wt_hazard_set_func --
+ *     Set a hazard pointer.
+ */
+int
+__wt_hazard_set_func(WT_SESSION_IMPL *session, WT_REF *ref, bool *busyp
+#ifdef HAVE_DIAGNOSTIC
+  ,
+  const char *func, int line
+#endif
+  )
+{
+    WT_HAZARD *hp;
+    uint8_t current_state;
+
+    *busyp = false;
+
+    /* If a file can never be evicted, hazard pointers aren't required. */
+    if (F_ISSET(S2BT(session), WT_BTREE_IN_MEMORY))
+        return (0);
+
+    /*
+     * If there isn't a valid page, we're done. This read can race with eviction and splits, we
+     * re-check it after a barrier to make sure we have a valid reference.
+     */
+    current_state = ref->state;
+    if (current_state != WT_REF_MEM) {
+        *busyp = true;
+        return (0);
+    }
+
+    /* If we have filled the current hazard pointer array, grow it. */
+    if (session->nhazard >= session->hazard_size) {
+        RET_MSG(-1, "__wt_hazard_set_func: We don't have an allocator :'(");
+        // WT_ASSERT(session, session->nhazard == session->hazard_size &&
+        //     session->hazard_inuse == session->hazard_size);
+        // WT_RET(hazard_grow(session));
+    }
+
+    /*
+     * If there are no available hazard pointer slots, make another one visible.
+     */
+    if (session->nhazard >= session->hazard_inuse) {
+        WT_ASSERT(session, session->nhazard == session->hazard_inuse &&
+            session->hazard_inuse < session->hazard_size);
+        hp = &session->hazard[session->hazard_inuse++];
+    } else {
+        WT_ASSERT(session, session->nhazard < session->hazard_inuse &&
+            session->hazard_inuse <= session->hazard_size);
+
+        /*
+         * There must be an empty slot in the array, find it. Skip most of the active slots by
+         * starting after the active count slot; there may be a free slot before there, but checking
+         * is expensive. If we reach the end of the array, continue the search from the beginning of
+         * the array.
+         */
+        for (hp = session->hazard + session->nhazard;; ++hp) {
+            if (hp >= session->hazard + session->hazard_inuse)
+                hp = session->hazard;
+            if (hp->ref == NULL)
+                break;
+        }
+    }
+
+    WT_ASSERT(session, hp->ref == NULL);
+
+    /*
+     * Do the dance:
+     *
+     * The memory location which makes a page "real" is the WT_REF's state of WT_REF_MEM, which can
+     * be set to WT_REF_LOCKED at any time by the page eviction server.
+     *
+     * Add the WT_REF reference to the session's hazard list and flush the write, then see if the
+     * page's state is still valid. If so, we can use the page because the page eviction server will
+     * see our hazard pointer before it discards the page (the eviction server sets the state to
+     * WT_REF_LOCKED, then flushes memory and checks the hazard pointers).
+     */
+    hp->ref = ref;
+#ifdef HAVE_DIAGNOSTIC
+    hp->func = func;
+    hp->line = line;
+#endif
+    /* Publish the hazard pointer before reading page's state. */
+    WT_FULL_BARRIER();
+
+    /*
+     * Check if the page state is still valid, where valid means a state of WT_REF_MEM.
+     */
+    current_state = ref->state;
+    if (current_state == WT_REF_MEM) {
+        ++session->nhazard;
+
+        /*
+         * Callers require a barrier here so operations holding the hazard pointer see consistent
+         * data.
+         */
+        WT_READ_BARRIER();
+        return (0);
+    }
+
+    /*
+     * The page isn't available, it's being considered for eviction (or being evicted, for all we
+     * know). If the eviction server sees our hazard pointer before evicting the page, it will
+     * return the page to use, no harm done, if it doesn't, it will go ahead and complete the
+     * eviction.
+     *
+     * We don't bother publishing this update: the worst case is we prevent some random page from
+     * being evicted.
+     */
+    hp->ref = NULL;
+    *busyp = true;
+    return (0);
 }
+
+
 
 /*
  * __wt_page_in_func --
@@ -2360,143 +2689,6 @@ __wt_ref_key(WT_PAGE *page, WT_REF *ref, void *keyp, size_t *sizep)
     }
 }
 
-/*
- * __wt_row_leaf_key_info --
- *     Return a row-store leaf page key referenced by a WT_ROW if it can be had without unpacking a
- *     cell, and information about the cell, if the key isn't cheaply available.
- */
-static inline bool
-__wt_row_leaf_key_info(
-  WT_PAGE *page, void *copy, WT_IKEY **ikeyp, WT_CELL **cellp, void *datap, size_t *sizep)
-{
-    WT_IKEY *ikey;
-    uintptr_t v;
-
-    v = (uintptr_t)copy;
-
-/*
- * A row-store leaf page key is in one of two places: if instantiated,
- * the WT_ROW pointer references a WT_IKEY structure, otherwise, it
- * references an on-page offset.  Further, on-page keys are in one of
- * two states: if the key is a simple key (not an overflow key, prefix
- * compressed or Huffman encoded, all of which are likely), the key's
- * offset/size is encoded in the pointer.  Otherwise, the offset is to
- * the key's on-page cell.
- *
- * Now the magic: allocated memory must be aligned to store any standard
- * type, and we expect some standard type to require at least quad-byte
- * alignment, so allocated memory should have some clear low-order bits.
- * On-page objects consist of an offset/length pair: the maximum page
- * size currently fits into 29 bits, so we use the low-order bits of the
- * pointer to mark the other bits of the pointer as encoding the key's
- * location and length.  This breaks if allocated memory isn't aligned,
- * of course.
- *
- * In this specific case, we use bit 0x01 to mark an on-page cell, bit
- * 0x02 to mark an on-page key, 0x03 to mark an on-page key/value pair,
- * otherwise it's a WT_IKEY reference. The bit pattern for on-page cells
- * is:
- *	29 bits		page offset of the key's cell,
- *	 2 bits		flags
- *
- * The bit pattern for on-page keys is:
- *	32 bits		key length,
- *	29 bits		page offset of the key's bytes,
- *	 2 bits		flags
- *
- * But, while that allows us to skip decoding simple key cells, we also
- * want to skip decoding the value cell in the case where the value cell
- * is also simple/short.  We use bit 0x03 to mark an encoded on-page key
- * and value pair.  The bit pattern for on-page key/value pairs is:
- *	 9 bits		key length,
- *	13 bits		value length,
- *	20 bits		page offset of the key's bytes,
- *	20 bits		page offset of the value's bytes,
- *	 2 bits		flags
- *
- * These bit patterns are in-memory only, of course, so can be modified
- * (we could even tune for specific workloads).  Generally, the fields
- * are larger than the anticipated values being stored (512B keys, 8KB
- * values, 1MB pages), hopefully that won't be necessary.
- *
- * This function returns a list of things about the key (instantiation
- * reference, cell reference and key/length pair).  Our callers know
- * the order in which we look things up and the information returned;
- * for example, the cell will never be returned if we are working with
- * an on-page key.
- */
-#define WT_CELL_FLAG 0x01
-#define WT_CELL_ENCODE_OFFSET(v) ((uintptr_t)(v) << 2)
-#define WT_CELL_DECODE_OFFSET(v) (((v)&0xFFFFFFFF) >> 2)
-
-#define WT_K_FLAG 0x02
-#define WT_K_ENCODE_KEY_LEN(v) ((uintptr_t)(v) << 32)
-#define WT_K_DECODE_KEY_LEN(v) ((v) >> 32)
-#define WT_K_ENCODE_KEY_OFFSET(v) ((uintptr_t)(v) << 2)
-#define WT_K_DECODE_KEY_OFFSET(v) (((v)&0xFFFFFFFF) >> 2)
-
-#define WT_KV_FLAG 0x03
-#define WT_KV_ENCODE_KEY_LEN(v) ((uintptr_t)(v) << 55)
-#define WT_KV_DECODE_KEY_LEN(v) ((v) >> 55)
-#define WT_KV_MAX_KEY_LEN (0x200 - 1)
-#define WT_KV_ENCODE_VALUE_LEN(v) ((uintptr_t)(v) << 42)
-#define WT_KV_DECODE_VALUE_LEN(v) (((v)&0x007FFC0000000000) >> 42)
-#define WT_KV_MAX_VALUE_LEN (0x2000 - 1)
-#define WT_KV_ENCODE_KEY_OFFSET(v) ((uintptr_t)(v) << 22)
-#define WT_KV_DECODE_KEY_OFFSET(v) (((v)&0x000003FFFFC00000) >> 22)
-#define WT_KV_MAX_KEY_OFFSET (0x100000 - 1)
-#define WT_KV_ENCODE_VALUE_OFFSET(v) ((uintptr_t)(v) << 2)
-#define WT_KV_DECODE_VALUE_OFFSET(v) (((v)&0x00000000003FFFFC) >> 2)
-#define WT_KV_MAX_VALUE_OFFSET (0x100000 - 1)
-    switch (v & 0x03) {
-    case WT_CELL_FLAG:
-        /* On-page cell: no instantiated key. */
-        if (ikeyp != NULL)
-            *ikeyp = NULL;
-        if (cellp != NULL)
-            *cellp = WT_PAGE_REF_OFFSET(page, WT_CELL_DECODE_OFFSET(v));
-        return (false);
-    case WT_K_FLAG:
-        /* Encoded key: no instantiated key, no cell. */
-        if (cellp != NULL)
-            *cellp = NULL;
-        if (ikeyp != NULL)
-            *ikeyp = NULL;
-        if (datap != NULL) {
-            *(void **)datap = WT_PAGE_REF_OFFSET(page, WT_K_DECODE_KEY_OFFSET(v));
-            *sizep = WT_K_DECODE_KEY_LEN(v);
-            return (true);
-        }
-        return (false);
-    case WT_KV_FLAG:
-        /* Encoded key/value pair: no instantiated key, no cell. */
-        if (cellp != NULL)
-            *cellp = NULL;
-        if (ikeyp != NULL)
-            *ikeyp = NULL;
-        if (datap != NULL) {
-            *(void **)datap = WT_PAGE_REF_OFFSET(page, WT_KV_DECODE_KEY_OFFSET(v));
-            *sizep = WT_KV_DECODE_KEY_LEN(v);
-            return (true);
-        }
-        return (false);
-    }
-
-    /* Instantiated key. */
-    ikey = copy;
-    if (ikeyp != NULL)
-        *ikeyp = copy;
-    if (cellp != NULL)
-        *cellp = WT_PAGE_REF_OFFSET(page, ikey->cell_offset);
-    if (datap != NULL) {
-        *(void **)datap = WT_IKEY_DATA(ikey);
-        *sizep = ikey->size;
-        return (true);
-    }
-    return (false);
-}
-
-
 
 /*
  * __wt_row_search --
@@ -2799,7 +2991,7 @@ leaf_only:
     base = 0;
     limit = page->entries;
     if (collator == NULL && srch_key->size <= WT_COMPARE_SHORT_MAXLEN)
-        RET_MSG("__wt_row_search: leaf wrong search code path 1");
+        RET_MSG(-1, "__wt_row_search: leaf wrong search code path 1");
         // for (; limit != 0; limit >>= 1) {
         //     indx = base + (limit >> 1);
         //     rip = page->pg_row + indx;
@@ -2840,7 +3032,7 @@ leaf_only:
                 goto leaf_match;
         }
     } else
-        RET_MSG("__wt_row_search: leaf wrong search code path 3");
+        RET_MSG(-1, "__wt_row_search: leaf wrong search code path 3");
         // for (; limit != 0; limit >>= 1) {
         //     indx = base + (limit >> 1);
         //     rip = page->pg_row + indx;
@@ -2919,39 +3111,20 @@ err:
 }
 
 
-
 /*
- * __wt_row_leaf_key --
- *     Set a buffer to reference a row-store leaf page key as cheaply as possible.
+ * __cursor_row_search --
+ *     Row-store search from a cursor.
  */
 static inline int
-__wt_row_leaf_key(
-  WT_SESSION_IMPL *session, WT_PAGE *page, WT_ROW *rip, WT_ITEM *key, bool instantiate)
+__cursor_row_search(WT_CURSOR_BTREE *cbt, bool insert, WT_REF *leaf, bool *leaf_foundp)
 {
-    void *copy;
+    WT_DECL_RET;
+    WT_SESSION_IMPL *session;
 
-    /*
-     * A front-end for __wt_row_leaf_key_work, here to inline fast paths.
-     *
-     * The row-store key can change underfoot; explicitly take a copy.
-     */
-    copy = WT_ROW_KEY_COPY(rip);
-
-    /*
-     * All we handle here are on-page keys (which should be a common case), and instantiated keys
-     * (which start out rare, but become more common as a leaf page is searched, instantiating
-     * prefix-compressed keys).
-     */
-    if (__wt_row_leaf_key_info(page, copy, NULL, NULL, &key->data, &key->size))
-        return (0);
-
-    /*
-     * The alternative is an on-page cell with some kind of compressed or overflow key that's never
-     * been instantiated. Call the underlying worker function to figure it out.
-     */
-    // NOTE: We don't use prefix compression!
-    RET_MSG(-1, "__wt_row_leaf_key: Prefix compression path entered!");
-    // return (__wt_row_leaf_key_work(session, page, rip, key, instantiate));
+    session = CUR2S(cbt);
+    WT_WITH_PAGE_INDEX(
+      session, ret = __wt_row_search(cbt, &cbt->iface.key, insert, leaf, false, leaf_foundp));
+    return (ret);
 }
 
 
@@ -3063,7 +3236,7 @@ __curfile_search(WT_CURSOR *cursor)
 
     cbt = (WT_CURSOR_BTREE *)cursor;
     // NOTE: Records last operation plus some timing stuff. Don't need it.
-    // CURSOR_API_CALL(cursor, session, search, CUR2BT(cbt));
+    CURSOR_API_CALL(cursor, session, search, CUR2BT(cbt));
     // NOTE: Debugging mode. Skip
     // WT_ERR(__cursor_copy_release(cursor));
     // NOTE: We set the key before, don't check here too.
@@ -3081,7 +3254,60 @@ __curfile_search(WT_CURSOR *cursor)
 
 err:
     // NOTE: Records last operation plus some timing stuff. Don't need it.
-    // API_END_RET(session, ret);
+    API_END_RET(session, ret);
+}
+
+
+/*
+ * We need a tombstone to mark deleted records, and we use the special value below for that purpose.
+ * We use two 0x14 (Device Control 4) bytes to minimize the likelihood of colliding with an
+ * application-chosen encoding byte, if the application uses two leading DC4 byte for some reason,
+ * we'll do a wasted data copy each time a new value is inserted into the object.
+ */
+static const WT_ITEM __tombstone = {"\x14\x14", 2, NULL, 0, 0};
+
+/*
+ * __wt_txn_err_set --
+ *     Set an error in the current transaction.
+ */
+static inline void
+__wt_txn_err_set(WT_SESSION_IMPL *session, int ret)
+{
+    WT_TXN *txn;
+
+    txn = session->txn;
+
+    /*  Ignore standard errors that don't fail the transaction. */
+    if (ret == WT_NOTFOUND || ret == WT_DUPLICATE_KEY || ret == WT_PREPARE_CONFLICT)
+        return;
+
+    /* Less commonly, it's not a running transaction. */
+    if (!F_ISSET(txn, WT_TXN_RUNNING))
+        return;
+
+    /* The transaction has to be rolled back. */
+    F_SET(txn, WT_TXN_ERROR);
+
+    /*
+     * Check for a prepared transaction, and quit: we can't ignore the error and we can't roll back
+     * a prepared transaction.
+     */
+
+    if (F_ISSET(txn, WT_TXN_PREPARE))
+        printf("transactional error logged after transaction was prepared, failing the system");
+        // WT_IGNORE_RET(__wt_panic(session, ret,
+        //   "transactional error logged after transaction was prepared, failing the system"));
+}
+
+/*
+ * __clsm_deleted --
+ *     Check whether the current value is a tombstone.
+ */
+static inline bool
+__clsm_deleted(WT_CURSOR_LSM *clsm, const WT_ITEM *item)
+{
+    return (!F_ISSET(clsm, WT_CLSM_MINOR_MERGE) && item->size == __tombstone.size &&
+      memcmp(item->data, __tombstone.data, __tombstone.size) == 0);
 }
 
 
@@ -3177,29 +3403,6 @@ err:
 // Main BPF function //
 ///////////////////////
 
-// TODO:
-// - __cursor_row_search
-// - __cursor_col_search
-// - __cursor_kv_return
-// - __cursor_fix_implicit
-// - strlen
-// - strcmp
-
-struct thread_fn_args {
-    WT_CONNECTION *conn;
-    WT_SESSION *session;
-    WT_CURSOR *cursor;
-};
-
-void *thread_fn(void *arg) {
-    struct thread_fn_args *args;
-    args = (struct thread_fn_args *)arg;
-    WT_SESSION_IMPL *session = (WT_SESSION_IMPL *) args->cursor->session;
-    // Logic...
-    // simulate_bpf_read(args->conn, session, args->cursor);
-
-    printf("Simulating read from BPF!\n\n");
-}
 
 int simulate_bpf_read(WT_CONNECTION *conn, WT_SESSION_IMPL *session,
                        WT_CURSOR *cursor) {
@@ -3231,33 +3434,7 @@ int simulate_bpf_read(WT_CONNECTION *conn, WT_SESSION_IMPL *session,
     ///////////////////
     // __clsm_lookup //
     ///////////////////
-
-    WT_CURSOR *c = NULL;
-    u_int i;
-    WT_FORALL_CURSORS(clsm, c, i)
-    {
-        // Skip bloom filters for now!
-        // 1. Set search key for the b-tree cursor of this level
-        //    Original code: c->set_key(c, &cursor->key);
-        __wt_cursor_set_key(c, &cursor->key);
-
-        // 2. Search for that key on this level's btree.
-
-        //////////////////////
-        // __curfile_search //
-        //////////////////////
-        WT_CURSOR_BTREE *cbt = (WT_CURSOR_BTREE *) c;
-
-        ///////////////////////
-        // __wt_btcur_search //
-        ///////////////////////
-        WT_RET(__wt_btcur_search(cbt));
-
-        // TODO: If found, set key, value
-
-    }
-
-    // TODO (end of __clsm_lookup): Set some cursor flags
+    ret = __clsm_lookup(clsm, &cursor->value);
 
     // __clsm_leave
     if (F_ISSET(clsm, WT_CLSM_ACTIVE)) {
@@ -3265,7 +3442,44 @@ int simulate_bpf_read(WT_CONNECTION *conn, WT_SESSION_IMPL *session,
         __cursor_leave(session);
         F_CLR(clsm, WT_CLSM_ACTIVE);
     }
+    return ret;
+}
 
+struct thread_fn_args {
+    WT_CONNECTION *conn;
+    WT_SESSION *session;
+    WT_CURSOR *cursor;
+};
+
+void *thread_fn(void *arg) {
+    struct thread_fn_args *args;
+    args = (struct thread_fn_args *)arg;
+    WT_SESSION_IMPL *session = (WT_SESSION_IMPL *) args->cursor->session;
+
+    // Get some key using the standard wiredtiger library.
+    char *key = "1231234";
+    char *value;
+    args->cursor->reset(args->cursor);
+    args->cursor->set_key(args->cursor, key);
+    int ret;
+    if ((ret = args->cursor->search(args->cursor)))
+        printf("Failed to find key %s. Return code: %d\n", key, ret);
+    if ((ret = args->cursor->get_value(args->cursor, &value)))
+        printf("Failed to get value for key %s", key);
+    printf("Wiredtiger Library: Key: '%s'. Value: '%s'.\n", key, value);
+
+
+    // Get the same key from the frankenstein we built.
+    printf("Simulating read from BPF!\n\n");
+    args->cursor->reset(args->cursor);
+    if ((ret = simulate_bpf_read(args->conn, session, args->cursor)))
+        printf("Frankenstein Library: Failed to get key %s. Return code: %d\n",
+               key, ret);
+    value = NULL;
+    if ((ret = args->cursor->get_value(args->cursor, &value)))
+        printf("Frankenstrein Library: Failed to get value for key %s", key);
+    printf("Frankenstein Library: Key: '%s'. Value: '%s'.\n", key, value);
+    return NULL;
 }
 
 inline void error(int exit_code, int return_code, char *msg) {

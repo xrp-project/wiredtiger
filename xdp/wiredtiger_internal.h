@@ -1,6 +1,11 @@
 #ifndef __WT_INTERNAL_H
 #define __WT_INTERNAL_H
 
+// Misc
+#define WT_UNUSED(var) (void)(var)
+#define WT_ASSERT(session, exp) WT_UNUSED(session)
+
+
 #include "basic_data_types.h"
 #include "stdarg.h"
 
@@ -287,11 +292,14 @@ typedef uint64_t wt_timestamp_t;
 #include "wiredtiger_ext.h"
 
 // Order from wt_internal.h
+#include "error.h"
+#include "optrack.h"
 #include "gcc.h"
 #include "hardware.h"
 #include "queue.h"
 #include "misc.h"
 #include "mutex.h"
+#include "thread_group.h"
 #include "stat.h"
 #include "dhandle.h"
 #include "timestamp.h"
@@ -303,6 +311,8 @@ typedef uint64_t wt_timestamp_t;
 #include "compact.h" // required by session.h
 #include "cursor.h"
 #include "cell.h"
+#include "meta.h"
+#include "capacity.h"
 #include "cache.h"
 #include "log.h"
 #include "lsm.h"

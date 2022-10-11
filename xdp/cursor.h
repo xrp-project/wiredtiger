@@ -10,6 +10,19 @@
 #define CUR2S(c) ((WT_SESSION_IMPL *)((WT_CURSOR *)c)->session)
 
 /*
+ * __wt_cursor_cached --
+ *     No actions on a closed and cached cursor are allowed.
+ */
+int
+__wt_cursor_cached(WT_CURSOR *cursor)
+{
+    WT_SESSION_IMPL *session;
+
+    session = CUR2S(cursor);
+    WT_RET_MSG(session, ENOTSUP, "Cursor has been closed");
+}
+
+/*
  * Initialize a static WT_CURSOR structure.
  */
 #define WT_CURSOR_STATIC_INIT(n, get_key, get_value, set_key, set_value, compare, equals, next, \

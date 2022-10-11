@@ -1,5 +1,5 @@
 GCC = gcc
-CFLAGS = -Og -g -Wall
+CFLAGS = -Og -g -Wall -Wno-comment -Wno-unused-variable -Wno-unused-but-set-variable -Wno-unused-label -fdiagnostics-color=always
 
 main.out: main.o
 	$(GCC) -o main.out main.o -lpthread -lwiredtiger

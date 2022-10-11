@@ -16,22 +16,22 @@ struct __wt_lsm_worker_cookie {
     u_int nchunks;
 };
 
-// /*
-//  * WT_LSM_WORKER_ARGS --
-//  *	State for an LSM worker thread.
-//  */
-// struct __wt_lsm_worker_args {
-//     WT_SESSION_IMPL *session; /* Session */
-//     WT_CONDVAR *work_cond;    /* Owned by the manager */
+/*
+ * WT_LSM_WORKER_ARGS --
+ *	State for an LSM worker thread.
+ */
+struct __wt_lsm_worker_args {
+    WT_SESSION_IMPL *session; /* Session */
+    WT_CONDVAR *work_cond;    /* Owned by the manager */
 
-//     wt_thread_t tid; /* Thread id */
-//     bool tid_set;    /* Thread id set */
+    wt_thread_t tid; /* Thread id */
+    bool tid_set;    /* Thread id set */
 
-//     u_int id;      /* My manager slot id */
-//     uint32_t type; /* Types of operations handled */
+    u_int id;      /* My manager slot id */
+    uint32_t type; /* Types of operations handled */
 
-//     volatile bool running; /* Worker is running */
-// };
+    volatile bool running; /* Worker is running */
+};
 
 /*
  * WT_LSM_CURSOR_CHUNK --
@@ -102,7 +102,7 @@ struct __wt_lsm_chunk {
                                       * The timestamp used to decide when
                                       * updates need to detect conflicts.
                                       */
-    WT_SPINLOCK timestamp_spinlock; // TODO: Find out size of WT_SPINLOCK and replace with padding
+    WT_SPINLOCK timestamp_spinlock;
 
     uint32_t id;            /* ID used to generate URIs */
     uint32_t generation;    /* Merge generation */
@@ -142,54 +142,54 @@ struct __wt_lsm_chunk {
     (WT_LSM_WORK_BLOOM | WT_LSM_WORK_DROP | WT_LSM_WORK_ENABLE_EVICT | WT_LSM_WORK_FLUSH | \
       WT_LSM_WORK_SWITCH)
 
-// /*
-//  * WT_LSM_WORK_UNIT --
-//  *	A definition of maintenance that an LSM tree needs done.
-//  */
-// struct __wt_lsm_work_unit {
-//     TAILQ_ENTRY(__wt_lsm_work_unit) q; /* Worker unit queue */
-//     uint32_t type;                     /* Type of operation */
-// /* AUTOMATIC FLAG VALUE GENERATION START */
-// #define WT_LSM_WORK_FORCE 0x1u /* Force operation */
-//                                /* AUTOMATIC FLAG VALUE GENERATION STOP */
-//     uint32_t flags;            /* Flags for operation */
-//     WT_LSM_TREE *lsm_tree;
-// };
+/*
+ * WT_LSM_WORK_UNIT --
+ *	A definition of maintenance that an LSM tree needs done.
+ */
+struct __wt_lsm_work_unit {
+    TAILQ_ENTRY(__wt_lsm_work_unit) q; /* Worker unit queue */
+    uint32_t type;                     /* Type of operation */
+/* AUTOMATIC FLAG VALUE GENERATION START */
+#define WT_LSM_WORK_FORCE 0x1u /* Force operation */
+                               /* AUTOMATIC FLAG VALUE GENERATION STOP */
+    uint32_t flags;            /* Flags for operation */
+    WT_LSM_TREE *lsm_tree;
+};
 
-// /*
-//  * WT_LSM_MANAGER --
-//  *	A structure that holds resources used to manage any LSM trees in a
-//  *	database.
-//  */
-// struct __wt_lsm_manager {
-//     /*
-//      * Queues of work units for LSM worker threads. We maintain three
-//      * queues, to allow us to keep each queue FIFO, rather than needing
-//      * to manage the order of work by shuffling the queue order.
-//      * One queue for switches - since switches should never wait for other
-//      *   work to be done.
-//      * One queue for application requested work. For example flushing
-//      *   and creating bloom filters.
-//      * One queue that is for longer running operations such as merges.
-//      */
-//     TAILQ_HEAD(__wt_lsm_work_switch_qh, __wt_lsm_work_unit) switchqh;
-//     TAILQ_HEAD(__wt_lsm_work_app_qh, __wt_lsm_work_unit) appqh;
-//     TAILQ_HEAD(__wt_lsm_work_manager_qh, __wt_lsm_work_unit) managerqh;
-//     WT_SPINLOCK switch_lock;  /* Lock for switch queue */
-//     WT_SPINLOCK app_lock;     /* Lock for application queue */
-//     WT_SPINLOCK manager_lock; /* Lock for manager queue */
-//     WT_CONDVAR *work_cond;    /* Used to notify worker of activity */
-//     uint32_t lsm_workers;     /* Current number of LSM workers */
-//     uint32_t lsm_workers_max;
-// #define WT_LSM_MAX_WORKERS 20
-// #define WT_LSM_MIN_WORKERS 3
-//     WT_LSM_WORKER_ARGS lsm_worker_cookies[WT_LSM_MAX_WORKERS];
+/*
+ * WT_LSM_MANAGER --
+ *	A structure that holds resources used to manage any LSM trees in a
+ *	database.
+ */
+struct __wt_lsm_manager {
+    /*
+     * Queues of work units for LSM worker threads. We maintain three
+     * queues, to allow us to keep each queue FIFO, rather than needing
+     * to manage the order of work by shuffling the queue order.
+     * One queue for switches - since switches should never wait for other
+     *   work to be done.
+     * One queue for application requested work. For example flushing
+     *   and creating bloom filters.
+     * One queue that is for longer running operations such as merges.
+     */
+    TAILQ_HEAD(__wt_lsm_work_switch_qh, __wt_lsm_work_unit) switchqh;
+    TAILQ_HEAD(__wt_lsm_work_app_qh, __wt_lsm_work_unit) appqh;
+    TAILQ_HEAD(__wt_lsm_work_manager_qh, __wt_lsm_work_unit) managerqh;
+    WT_SPINLOCK switch_lock;  /* Lock for switch queue */
+    WT_SPINLOCK app_lock;     /* Lock for application queue */
+    WT_SPINLOCK manager_lock; /* Lock for manager queue */
+    WT_CONDVAR *work_cond;    /* Used to notify worker of activity */
+    uint32_t lsm_workers;     /* Current number of LSM workers */
+    uint32_t lsm_workers_max;
+#define WT_LSM_MAX_WORKERS 20
+#define WT_LSM_MIN_WORKERS 3
+    WT_LSM_WORKER_ARGS lsm_worker_cookies[WT_LSM_MAX_WORKERS];
 
-// /* AUTOMATIC FLAG VALUE GENERATION START */
-// #define WT_LSM_MANAGER_SHUTDOWN 0x1u /* Manager has shut down */
-//                                      /* AUTOMATIC FLAG VALUE GENERATION STOP */
-//     uint32_t flags;
-// };
+/* AUTOMATIC FLAG VALUE GENERATION START */
+#define WT_LSM_MANAGER_SHUTDOWN 0x1u /* Manager has shut down */
+                                     /* AUTOMATIC FLAG VALUE GENERATION STOP */
+    uint32_t flags;
+};
 
 /*
  * The value aggressive needs to get to before it influences how merges are chosen. The default
@@ -227,7 +227,7 @@ struct __wt_lsm_tree {
 
 #define LSM_TREE_MAX_QUEUE 100
     uint32_t queue_ref;
-    WT_RWLOCK rwlock; // TODO: Find out size of rwlock and insert padding instead
+    WT_RWLOCK rwlock;
     TAILQ_ENTRY(__wt_lsm_tree) q;
 
     uint64_t dsk_gen;
@@ -312,3 +312,12 @@ struct __wt_lsm_tree {
     uint32_t flags;
 };
 
+/*
+ * WT_LSM_DATA_SOURCE --
+ *	Implementation of the WT_DATA_SOURCE interface for LSM.
+ */
+struct __wt_lsm_data_source {
+    WT_DATA_SOURCE iface;
+
+    WT_RWLOCK *rwlock;
+};
