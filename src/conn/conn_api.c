@@ -2348,6 +2348,7 @@ wiredtiger_open(const char *home, WT_EVENT_HANDLER *event_handler, const char *c
     char version[64];
 
     char *bpf_env;
+    char *bpf_fd_env;
     int bpf_ret;
     struct bpf_object *obj;
 
@@ -2361,6 +2362,11 @@ wiredtiger_open(const char *home, WT_EVENT_HANDLER *event_handler, const char *c
     } else {
         printf("WT_BPF_PATH is not specified. XRP is disabled.\n");
         bpf_fd = -1;
+    }
+
+    bpf_fd_env = getenv("WT_BPF_FD");
+    if (bpf_fd_env != NULL) {
+        bpf_fd = atoi(bpf_fd_env);
     }
 
 #if 0
