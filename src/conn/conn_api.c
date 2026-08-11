@@ -2369,6 +2369,30 @@ wiredtiger_open(const char *home, WT_EVENT_HANDLER *event_handler, const char *c
         bpf_fd = atoi(bpf_fd_env);
     }
 
+    bpf_env = getenv("WT_BPF_BTREE_PATH");
+    if (bpf_env != NULL) {
+        bpf_ret = bpf_prog_load(bpf_env, BPF_PROG_TYPE_XRP, &obj, &bpf_btree_fd);
+        if (bpf_ret) {
+            printf("Failed to load B-tree BPF program\n");
+            exit(1);
+        }
+    } else {
+        printf("WT_BPF_BTREE_PATH is not specified. B-tree XRP is disabled.\n");
+        bpf_btree_fd = -1;
+    }
+
+    bpf_fd_env = getenv("WT_BPF_BTREE_FD");
+    if (bpf_fd_env != NULL) {
+        bpf_btree_fd = atoi(bpf_fd_env);
+    }
+
+    bpf_fd_env = getenv("WT_BPF_BTREE_SAMPLE");
+    if (bpf_fd_env != NULL) {
+        bpf_btree_sample_rate = atoi(bpf_fd_env);
+        if (bpf_btree_sample_rate < 0)
+            bpf_btree_sample_rate = 0;
+    }
+
 #if 0
     /* FIXME-WT-6263: Temporarily disable history store verification. */
     WT_SESSION_IMPL *verify_session;

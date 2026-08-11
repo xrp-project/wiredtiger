@@ -131,3 +131,30 @@ struct wt_ebpf_scratch {
     int32_t nr_page;
     uint64_t descent_index_arr[EBPF_MAX_DEPTH];
 };
+
+/*
+ * B-tree lookup pushdown. The BPF program walks the internal pages, searches
+ * the leaf in the completion path and returns only the lookup result through
+ * the scratch buffer. Must match struct wt_btree_scratch in
+ * bpf_prog/wt_btree_bpf.c.
+ */
+#define EBPF_BTREE_VALUE_MAX_LEN 128
+
+#define EBPF_BTREE_FOUND 0
+#define EBPF_BTREE_NOTFOUND 1
+
+struct wt_btree_scratch {
+    uint64_t key_size;
+    char key[EBPF_KEY_MAX_LEN];
+
+    int32_t state;
+    int32_t nr_page;
+    uint64_t value_size;
+    char value[EBPF_BTREE_VALUE_MAX_LEN];
+};
+
+extern int bpf_btree_fd;
+extern int bpf_btree_sample_rate;
+
+int ebpf_btree_lookup(int fd, uint64_t offset, uint8_t *key_buf, uint64_t key_size,
+                      uint8_t *data_buf, uint8_t *scratch_buf);

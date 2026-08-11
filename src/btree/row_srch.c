@@ -228,6 +228,8 @@ __wt_row_search(WT_CURSOR_BTREE *cbt, WT_ITEM *srch_key, bool insert, WT_REF *le
     int ebpf_nr_page, ebpf_i;
     uint64_t ebpf_child_index_arr[EBPF_MAX_DEPTH];
     uint8_t *ebpf_page_arr;
+    WT_ADDR_COPY ebpf_addr;
+    uint8_t *ebpf_cookie;
     struct timespec start_ts, end_ts;
     if (clock_gettime(CLOCK_REALTIME, &start_ts) == -1) {
         printf("clock_gettime failed\n");
@@ -443,6 +445,45 @@ descend:
         read_flags = WT_READ_RESTART_OK;
         if (F_ISSET(cbt, WT_CBT_READ_ONCE))
             FLD_SET(read_flags, WT_READ_WONT_NEED);
+
+        /*
+         * B-tree pushdown: at the first disk-only ref, run the rest of the
+         * lookup (internal descent and leaf search) inside XRP and return
+         * only the result. On any failure fall back to the normal read path.
+         */
+        if (F_ISSET(cbt, WT_CBT_EBPF_BTREE) && !insert && descent->state == WT_REF_DISK &&
+          srch_key->size <= EBPF_KEY_MAX_LEN && __wt_ref_addr_copy(session, descent, &ebpf_addr) &&
+          (ebpf_addr.type == WT_ADDR_INT || ebpf_addr.type == WT_ADDR_LEAF ||
+            ebpf_addr.type == WT_ADDR_LEAF_NO)) {
+            ebpf_cookie = ebpf_addr.addr;
+            ebpf_ret = ebpf_addr_to_offset(ebpf_cookie, &ebpf_offset, &ebpf_size);
+            if (ebpf_ret == 0 && ebpf_size == EBPF_BLOCK_SIZE) {
+                ebpf_ret =
+                  ebpf_btree_lookup(((WT_FILE_HANDLE_POSIX *)btree->bm->block->fh->handle)->fd,
+                    ebpf_offset, (uint8_t *)srch_key->data, srch_key->size, cbt->ebpf_data_buffer,
+                    cbt->ebpf_scratch_buffer);
+                if (ebpf_ret == 0) {
+                    F_SET(cbt, WT_CBT_EBPF_SUCCESS);
+                    WT_RET(__wt_page_release(session, current, 0));
+                    return (0);
+                }
+            }
+            {
+                extern atomic_long bpf_btree_fallback_count;
+                static int ebpf_btree_fallback_prints = 0;
+                atomic_fetch_add(&bpf_btree_fallback_count, 1);
+                if (ebpf_btree_fallback_prints++ < 5)
+                    printf("ebpf_btree fallback: ret=%d addr_type=%d off=%llu size=%llu\n",
+                      ebpf_ret, ebpf_addr.type, (unsigned long long)ebpf_offset,
+                      (unsigned long long)ebpf_size);
+            }
+            /*
+             * The fallback is one search only: XRP failures under write load
+             * are expected transients (extent churn during checkpoints), the
+             * next search retries the pushdown.
+             */
+            F_CLR(cbt, WT_CBT_EBPF_BTREE);
+        }
 
         /*
          * check if the descent is in memory.

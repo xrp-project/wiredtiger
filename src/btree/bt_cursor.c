@@ -527,6 +527,39 @@ __wt_btcur_search(WT_CURSOR_BTREE *cbt)
     __cursor_state_save(cursor, &state);
 
     /*
+     * Enable the XRP B-tree pushdown for supported trees: row-store, bytewise
+     * comparison, no compression or encryption, 512-byte blocks.
+     *
+     * Cache sampling: a small fraction of eligible searches runs through the
+     * normal read path instead. Those searches publish pages into the cache,
+     * letting the resident prefix of the tree regrow, which result-only XRP
+     * lookups can never do on their own.
+     */
+    F_CLR(cbt, WT_CBT_EBPF_SUCCESS);
+    if (bpf_btree_fd != -1 && !F_ISSET(cbt, WT_CBT_EBPF_ERROR) && btree->type == BTREE_ROW &&
+      btree->collator == NULL && btree->compressor == NULL && btree->kencryptor == NULL &&
+      btree->allocsize == EBPF_BLOCK_SIZE && !WT_IS_METADATA(cbt->dhandle) && !WT_IS_HS(btree)) {
+        extern atomic_long bpf_btree_sample_counter, bpf_btree_sample_count;
+        bool ebpf_sampled = bpf_btree_sample_rate > 0 &&
+          atomic_fetch_add(&bpf_btree_sample_counter, 1) % bpf_btree_sample_rate == 0;
+        if (ebpf_sampled)
+            atomic_fetch_add(&bpf_btree_sample_count, 1);
+        else {
+            if (cbt->ebpf_data_buffer == NULL)
+                cbt->ebpf_data_buffer = aligned_alloc(EBPF_DATA_BUFFER_SIZE, EBPF_DATA_BUFFER_SIZE);
+            if (cbt->ebpf_scratch_buffer == NULL)
+                cbt->ebpf_scratch_buffer =
+                  aligned_alloc(EBPF_SCRATCH_BUFFER_SIZE, EBPF_SCRATCH_BUFFER_SIZE);
+            if (cbt->ebpf_data_buffer != NULL && cbt->ebpf_scratch_buffer != NULL) {
+                static int ebpf_btree_enable_prints = 0;
+                if (ebpf_btree_enable_prints++ < 1)
+                    printf("ebpf_btree enabled for %s\n", cbt->dhandle->name);
+                F_SET(cbt, WT_CBT_EBPF_BTREE);
+            }
+        }
+    }
+
+    /*
      * If we have a page pinned, search it; if we don't have a page pinned, or the search of the
      * pinned page doesn't find an exact match, search from the root.
      */
@@ -549,6 +582,24 @@ __wt_btcur_search(WT_CURSOR_BTREE *cbt)
 
         if (btree->type == BTREE_ROW) {
             WT_ERR(__cursor_row_search(cbt, false, NULL, NULL));
+            /*
+             * An XRP lookup bypasses the in-memory tree below the first
+             * disk-only ref: the result was produced in the completion path
+             * and the cursor is left unpositioned.
+             */
+            if (F_ISSET(cbt, WT_CBT_EBPF_SUCCESS)) {
+                struct wt_btree_scratch *ebpf_scratch =
+                  (struct wt_btree_scratch *)cbt->ebpf_scratch_buffer;
+                F_CLR(cbt, WT_CBT_EBPF_SUCCESS);
+                if (ebpf_scratch->state == EBPF_BTREE_FOUND) {
+                    WT_ERR(__wt_buf_set(
+                      session, &cursor->value, ebpf_scratch->value, (size_t)ebpf_scratch->value_size));
+                    F_SET(cursor, WT_CURSTD_VALUE_INT);
+                    ret = 0;
+                } else
+                    ret = WT_NOTFOUND;
+                goto err;
+            }
             if (cbt->compare == 0)
                 WT_ERR(__wt_cursor_valid(cbt, cbt->tmp, WT_RECNO_OOB, &valid));
         } else {
@@ -580,6 +631,7 @@ __wt_btcur_search(WT_CURSOR_BTREE *cbt)
 #endif
 
 err:
+    F_CLR(cbt, WT_CBT_EBPF_BTREE);
     if (ret != 0) {
         WT_TRET(__cursor_reset(cbt));
         __cursor_state_restore(cursor, &state);
@@ -1896,6 +1948,15 @@ __wt_btcur_close(WT_CURSOR_BTREE *cbt, bool lowlevel)
 #ifdef HAVE_DIAGNOSTIC
     __wt_buf_free(session, &cbt->_lastkey);
 #endif
+
+    if (cbt->ebpf_data_buffer != NULL) {
+        free(cbt->ebpf_data_buffer);
+        cbt->ebpf_data_buffer = NULL;
+    }
+    if (cbt->ebpf_scratch_buffer != NULL) {
+        free(cbt->ebpf_scratch_buffer);
+        cbt->ebpf_scratch_buffer = NULL;
+    }
 
     return (ret);
 }

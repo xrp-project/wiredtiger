@@ -103,6 +103,12 @@ __wt_connection_close(WT_CONNECTION_IMPL *conn)
     printf("raw_io_count: %ld\n", atomic_load(&raw_io_count));
     printf("cache_eviction_time: %ld\n", atomic_load(&cache_eviction_time));
     printf("cache_eviction_count: %ld\n", atomic_load(&cache_eviction_count));
+    {
+        extern atomic_long bpf_btree_page_count, bpf_btree_sample_count, bpf_btree_fallback_count;
+        printf("bpf_btree_page_count: %ld\n", atomic_load(&bpf_btree_page_count));
+        printf("bpf_btree_sample_count: %ld\n", atomic_load(&bpf_btree_sample_count));
+        printf("bpf_btree_fallback_count: %ld\n", atomic_load(&bpf_btree_fallback_count));
+    }
 
     /*
      * The LSM and async services are not shut down in this path (which is called when

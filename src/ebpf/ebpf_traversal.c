@@ -169,3 +169,64 @@ int ebpf_lookup(int fd, uint64_t offset, uint8_t *key_buf, uint64_t key_size,
     atomic_fetch_add(&bpf_io_count, 1);
     return 0;
 }
+
+int bpf_btree_fd = -1;
+atomic_long bpf_btree_page_count;
+
+/*
+ * Cache sampling: one in every bpf_btree_sample_rate eligible searches runs
+ * through the normal read path instead of XRP. The sampled searches publish
+ * pages into the cache, letting the resident prefix of the tree regrow, which
+ * result-only XRP lookups can never do on their own. Zero disables sampling.
+ */
+int bpf_btree_sample_rate = 100;
+atomic_long bpf_btree_sample_counter;
+atomic_long bpf_btree_sample_count;
+atomic_long bpf_btree_fallback_count;
+
+/*
+ * ebpf_btree_lookup --
+ *     Run a full B-tree point lookup through XRP, starting from the given
+ *     block offset. On success the caller reads the verdict and value from
+ *     the scratch buffer.
+ */
+int ebpf_btree_lookup(int fd, uint64_t offset, uint8_t *key_buf, uint64_t key_size,
+                      uint8_t *data_buf, uint8_t *scratch_buf) {
+    struct wt_btree_scratch *scratch = (struct wt_btree_scratch *) scratch_buf;
+    int ret;
+    struct timespec start_ts, end_ts;
+    if (clock_gettime(CLOCK_REALTIME, &start_ts) == -1) {
+        printf("clock_gettime failed\n");
+    }
+
+    if (key_size > EBPF_KEY_MAX_LEN) {
+        return -EBPF_EINVAL;
+    }
+
+    /* initialize data buf & scratch buf */
+    memset(data_buf, 0, EBPF_DATA_BUFFER_SIZE);
+    memset(scratch_buf, 0, EBPF_SCRATCH_BUFFER_SIZE);
+    scratch->key_size = key_size;
+    memcpy(scratch->key, key_buf, key_size);
+    /* sentinel, detects the BPF program never running */
+    scratch->state = -1;
+
+    ret = syscall(__NR_read_xrp, fd, data_buf, EBPF_BLOCK_SIZE, offset, bpf_btree_fd, scratch_buf);
+    if (ret != EBPF_BLOCK_SIZE) {
+        return -EBPF_EINVAL;
+    }
+    if (scratch->state != EBPF_BTREE_FOUND && scratch->state != EBPF_BTREE_NOTFOUND) {
+        return -EBPF_EINVAL;
+    }
+    if (scratch->state == EBPF_BTREE_FOUND && scratch->value_size > EBPF_BTREE_VALUE_MAX_LEN) {
+        return -EBPF_EINVAL;
+    }
+    atomic_fetch_add(&bpf_btree_page_count, scratch->nr_page);
+
+    if (clock_gettime(CLOCK_REALTIME, &end_ts) == -1) {
+        printf("clock_gettime failed\n");
+    }
+    atomic_fetch_add(&bpf_io_time, (end_ts.tv_sec * 1000000000L + end_ts.tv_nsec) - (start_ts.tv_sec * 1000000000L + start_ts.tv_nsec));
+    atomic_fetch_add(&bpf_io_count, 1);
+    return 0;
+}
