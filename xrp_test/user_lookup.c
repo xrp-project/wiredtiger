@@ -24,11 +24,13 @@
 
 #include <wiredtiger.h>
 
-#define BTREE_BLOCK_SIZE 512
+#include "kv.h"
+
+#define BTREE_BLOCK_SIZE 4096
 #define BTREE_MAX_DEPTH 8
 #define BTREE_PAGE_HEADER_SIZE 28
 #define BTREE_BLOCK_HEADER_SIZE 12
-#define BTREE_VALUE_MAX_LEN 128
+#define BTREE_VALUE_MAX_LEN 1400
 
 #define BTREE_PAGE_ROW_INT 6
 #define BTREE_PAGE_ROW_LEAF 7
@@ -566,7 +568,7 @@ bench_worker(void *varg)
     unsigned int seed;
     uint32_t k;
     int ret;
-    char expect[32], key[32];
+    char expect[KV_VALUE_MAX], key[32];
 
     seed = (unsigned int)(0x9e3779b9u * (uint32_t)((uintptr_t)varg + 1));
     page_buf = aligned_alloc(4096, 4096);
@@ -574,8 +576,8 @@ bench_worker(void *varg)
         return (NULL);
     while (!bench_state.stop) {
         k = (uint32_t)rand_r(&seed) % bench_state.nkeys;
-        snprintf(key, sizeof(key), "%08u", k);
-        snprintf(expect, sizeof(expect), "V%08u-%06x", k, k * 7919u);
+        kv_make_key(key, k);
+        kv_make_value(expect, k);
         ret = raw_lookup(bench_state.fd, bench_state.root_offset, (const uint8_t *)key,
           strlen(key) + 1, &res);
         if (ret == 0 && res.found && res.value_len == strlen(expect) + 1 &&
@@ -664,15 +666,15 @@ main(int argc, char **argv)
         uint64_t elapsed_ns;
         uint32_t i, nkeys, nfound, nmissing, nmismatch, nerror;
         int max_depth;
-        char key[32], expect[32];
+        char key[32], expect[KV_VALUE_MAX];
 
         nkeys = (uint32_t)strtoul(argv[4], NULL, 10);
         nfound = nmissing = nmismatch = nerror = 0;
         max_depth = 0;
         clock_gettime(CLOCK_MONOTONIC, &start_ts);
         for (i = 0; i < nkeys; ++i) {
-            snprintf(key, sizeof(key), "%08u", i);
-            snprintf(expect, sizeof(expect), "V%08u-%06x", i, i * 7919u);
+            kv_make_key(key, i);
+            kv_make_value(expect, i);
             ret = raw_lookup(fd, root_offset, (const uint8_t *)key, strlen(key) + 1, &res);
             if (res.depth > max_depth)
                 max_depth = res.depth;

@@ -528,7 +528,7 @@ __wt_btcur_search(WT_CURSOR_BTREE *cbt)
 
     /*
      * Enable the XRP B-tree pushdown for supported trees: row-store, bytewise
-     * comparison, no compression or encryption, 512-byte blocks.
+     * comparison, no compression or encryption, EBPF_BLOCK_SIZE blocks.
      *
      * Cache sampling: a small fraction of eligible searches runs through the
      * normal read path instead. Those searches publish pages into the cache,

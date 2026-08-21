@@ -39,10 +39,10 @@ char _license[] SEC("license") = "GPL";
 /*
  * Config definitions
  */
-#define EBPF_BLOCK_SIZE 512
+#define EBPF_BLOCK_SIZE 4096
 #define EBPF_MAX_DEPTH 6
 #define EBPF_KEY_MAX_LEN 18
-#define EBPF_VALUE_MAX_LEN 128
+#define EBPF_VALUE_MAX_LEN 1400
 #define EBPF_CONTEXT_MASK 0xfff
 
 /*

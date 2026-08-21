@@ -4,7 +4,7 @@
 
 #define EBPF_DATA_BUFFER_SIZE 4096
 #define EBPF_SCRATCH_BUFFER_SIZE 4096
-#define EBPF_BLOCK_SIZE 512
+#define EBPF_BLOCK_SIZE 4096
 /* page is always block size */
 #define EBPF_MAX_DEPTH 6
 #define EBPF_KEY_MAX_LEN 18
@@ -138,7 +138,7 @@ struct wt_ebpf_scratch {
  * the scratch buffer. Must match struct wt_btree_scratch in
  * bpf_prog/wt_btree_bpf.c.
  */
-#define EBPF_BTREE_VALUE_MAX_LEN 128
+#define EBPF_BTREE_VALUE_MAX_LEN 1400
 
 #define EBPF_BTREE_FOUND 0
 #define EBPF_BTREE_NOTFOUND 1

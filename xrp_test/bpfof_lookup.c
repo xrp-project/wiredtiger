@@ -29,12 +29,14 @@
 
 #include <wiredtiger.h>
 
+#include "kv.h"
+
 #define __NR_read_xrp 445
 #define SYS_READ_BPFOF 447
 
-#define BTREE_BLOCK_SIZE 512
+#define BTREE_BLOCK_SIZE 4096
 #define BTREE_KEY_MAX_LEN 18
-#define BTREE_VALUE_MAX_LEN 128
+#define BTREE_VALUE_MAX_LEN 1400
 #define BUFFER_SIZE 4096
 
 #define BTREE_FOUND 0
@@ -247,7 +249,7 @@ bench_worker(void *varg)
     unsigned int seed;
     uint32_t k;
     uint8_t *data_buf, *scratch_buf;
-    char expect[32], key[32];
+    char expect[KV_VALUE_MAX], key[32];
 
     seed = (unsigned int)(0x85ebca6bu * (uint32_t)((uintptr_t)varg + 1));
     data_buf = aligned_alloc(BUFFER_SIZE, BUFFER_SIZE);
@@ -256,8 +258,8 @@ bench_worker(void *varg)
         return (NULL);
     while (!bench_state.stop) {
         k = (uint32_t)rand_r(&seed) % bench_state.nkeys;
-        snprintf(key, sizeof(key), "%08u", k);
-        snprintf(expect, sizeof(expect), "V%08u-%06x", k, k * 7919u);
+        kv_make_key(key, k);
+        kv_make_value(expect, k);
         if (xrp_lookup(bench_state.fd, bench_state.bpf_fd, bench_state.root_offset, key,
               strlen(key) + 1, data_buf, scratch_buf, &res) == 0 &&
           res->state == BTREE_FOUND && res->value_size == strlen(expect) + 1 &&
@@ -360,15 +362,15 @@ main(int argc, char **argv)
         uint64_t elapsed_ns;
         uint32_t i, nkeys, nfound, nmissing, nmismatch, nerror;
         int max_pages;
-        char key[32], expect[32];
+        char key[32], expect[KV_VALUE_MAX];
 
         nkeys = (uint32_t)strtoul(argv[5], NULL, 10);
         nfound = nmissing = nmismatch = nerror = 0;
         max_pages = 0;
         clock_gettime(CLOCK_MONOTONIC, &start_ts);
         for (i = 0; i < nkeys; ++i) {
-            snprintf(key, sizeof(key), "%08u", i);
-            snprintf(expect, sizeof(expect), "V%08u-%06x", i, i * 7919u);
+            kv_make_key(key, i);
+            kv_make_value(expect, i);
             if (xrp_lookup(fd, bpf_fd, root_offset, key, strlen(key) + 1, data_buf,
                   scratch_buf, &res) != 0) {
                 ++nerror;

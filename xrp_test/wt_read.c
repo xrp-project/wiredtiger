@@ -17,6 +17,8 @@
 
 #include <wiredtiger.h>
 
+#include "kv.h"
+
 #define URI "file:xrp_test.wt"
 
 int
@@ -30,7 +32,7 @@ main(int argc, char **argv)
     uint32_t cache_mb, i, k, nkeys, nfound, nmissing, nmismatch, pass, passes, rng;
     int randomized, ret, warm;
     const char *got;
-    char config[128], key[32], expect[32];
+    char config[128], key[32], expect[KV_VALUE_MAX];
 
     if (argc < 3) {
         fprintf(stderr, "usage: %s <home> <nkeys> [cache_mb] [passes]\n", argv[0]);
@@ -82,8 +84,8 @@ main(int argc, char **argv)
                 k = rng % nkeys;
             } else
                 k = i;
-            snprintf(key, sizeof(key), "%08u", k);
-            snprintf(expect, sizeof(expect), "V%08u-%06x", k, k * 7919u);
+            kv_make_key(key, k);
+            kv_make_value(expect, k);
             cursor->set_key(cursor, key);
             ret = cursor->search(cursor);
             if (ret == WT_NOTFOUND) {
