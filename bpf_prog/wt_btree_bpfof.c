@@ -40,6 +40,13 @@ char _license[] SEC("license") = "GPL";
  * Config definitions
  */
 #define EBPF_BLOCK_SIZE 4096
+/*
+ * Loop bound for per-cell page scans. Must exceed the largest possible cell
+ * count of one page; kept far below EBPF_BLOCK_SIZE so the verifier's
+ * jump-sequence budget holds. A 4KB page with the smallest realistic cells
+ * stays under ~600 entries.
+ */
+#define EBPF_MAX_CELLS 600
 #define EBPF_MAX_DEPTH 6
 #define EBPF_KEY_MAX_LEN 18
 #define EBPF_VALUE_MAX_LEN 1400
@@ -541,7 +548,7 @@ __noinline int ebpf_search_int_page(struct bpf_xrp *context,
     p_offset += (EBPF_PAGE_HEADER_SIZE + EBPF_BLOCK_HEADER_SIZE);
 
     /* traverse all key value pairs */
-    for (i = 0, ii = EBPF_BLOCK_SIZE; i < nr_kv && ii > 0; ++i, --ii) {
+    for (i = 0, ii = EBPF_MAX_CELLS; i < nr_kv && ii > 0; ++i, --ii) {
         uint64_t cell_key_offset = 0, cell_key_size = 0;
         uint64_t cell_descent_offset = 0, cell_descent_size = 0;
         int cmp = 0;
@@ -626,7 +633,7 @@ __noinline int ebpf_search_leaf_page(struct bpf_xrp *context,
 
     p_offset += (EBPF_PAGE_HEADER_SIZE + EBPF_BLOCK_HEADER_SIZE);
 
-    for (consumed = 0, ii = EBPF_BLOCK_SIZE; consumed < entries && ii > 0; --ii) {
+    for (consumed = 0, ii = EBPF_MAX_CELLS; consumed < entries && ii > 0; --ii) {
         uint64_t cell_key_offset = 0, cell_key_size = 0;
         uint64_t cell_value_offset = 0, cell_value_size = 0;
 
