@@ -171,6 +171,14 @@ int ebpf_lookup(int fd, uint64_t offset, uint8_t *key_buf, uint64_t key_size,
 }
 
 int bpf_btree_fd = -1;
+
+/*
+ * Over NVMe-oF the read_xrp syscall is not wired up; only read_bpfof carries
+ * the serialized command config the target parses, and the BPF program runs
+ * target-side from its pinned copy. WT_BPF_BTREE_BPFOF=1 selects that path.
+ */
+#define SYS_read_bpfof 447
+static int bpf_btree_use_bpfof = -1;
 atomic_long bpf_btree_page_count;
 
 /*
@@ -211,9 +219,22 @@ int ebpf_btree_lookup(int fd, uint64_t offset, uint8_t *key_buf, uint64_t key_si
     /* sentinel, detects the BPF program never running */
     scratch->state = -1;
 
-    ret = syscall(__NR_read_xrp, fd, data_buf, EBPF_BLOCK_SIZE, offset, bpf_btree_fd, scratch_buf);
-    if (ret != EBPF_BLOCK_SIZE) {
-        return -EBPF_EINVAL;
+    if (bpf_btree_use_bpfof < 0)
+        bpf_btree_use_bpfof = getenv("WT_BPF_BTREE_BPFOF") != NULL;
+    if (bpf_btree_use_bpfof) {
+        unsigned int fds_arr[16];
+        memset(fds_arr, 0, sizeof(fds_arr));
+        fds_arr[0] = (unsigned int)fd;
+        ret = (int)syscall(SYS_read_bpfof, fds_arr, (size_t)1, (size_t)EBPF_BLOCK_SIZE,
+          (off_t)offset, scratch_buf, (size_t)EBPF_SCRATCH_BUFFER_SIZE);
+        if (ret < 0) {
+            return -EBPF_EINVAL;
+        }
+    } else {
+        ret = syscall(__NR_read_xrp, fd, data_buf, EBPF_BLOCK_SIZE, offset, bpf_btree_fd, scratch_buf);
+        if (ret != EBPF_BLOCK_SIZE) {
+            return -EBPF_EINVAL;
+        }
     }
     if (scratch->state != EBPF_BTREE_FOUND && scratch->state != EBPF_BTREE_NOTFOUND) {
         return -EBPF_EINVAL;

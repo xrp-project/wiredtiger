@@ -29,13 +29,14 @@ main(int argc, char **argv)
     WT_SESSION *session;
     struct timespec start_ts, end_ts;
     uint64_t elapsed_ns;
-    uint32_t cache_mb, i, k, nkeys, nfound, nmissing, nmismatch, pass, passes, rng;
+    uint32_t cache_mb, i, k, nkeys, nfound, nlookups, nmissing, nmismatch, pass, passes, rng;
     int randomized, ret, warm;
     const char *got;
     char config[128], key[32], expect[KV_VALUE_MAX];
 
     if (argc < 3) {
-        fprintf(stderr, "usage: %s <home> <nkeys> [cache_mb] [passes]\n", argv[0]);
+        fprintf(stderr, "usage: %s <home> <nkeys> [cache_mb] [passes] [rand] [warm] [nlookups]\n",
+          argv[0]);
         return (1);
     }
     nkeys = (uint32_t)strtoul(argv[2], NULL, 10);
@@ -43,6 +44,7 @@ main(int argc, char **argv)
     passes = argc > 4 ? (uint32_t)strtoul(argv[4], NULL, 10) : 1;
     randomized = argc > 5 && strcmp(argv[5], "rand") == 0;
     warm = argc > 6 && strcmp(argv[6], "warm") == 0;
+    nlookups = argc > 7 ? (uint32_t)strtoul(argv[7], NULL, 10) : nkeys;
 
     snprintf(config, sizeof(config),
       "cache_size=%uMB,direct_io=[data],buffer_alignment=512B,mmap=false", cache_mb);
@@ -76,7 +78,7 @@ main(int argc, char **argv)
     for (pass = 0; pass < passes; ++pass) {
         nfound = nmissing = nmismatch = 0;
         clock_gettime(CLOCK_MONOTONIC, &start_ts);
-        for (i = 0; i < nkeys; ++i) {
+        for (i = 0; i < nlookups; ++i) {
             if (randomized) {
                 rng ^= rng << 13;
                 rng ^= rng >> 17;
@@ -113,8 +115,8 @@ main(int argc, char **argv)
         clock_gettime(CLOCK_MONOTONIC, &end_ts);
         elapsed_ns = (uint64_t)(end_ts.tv_sec - start_ts.tv_sec) * 1000000000 +
           (uint64_t)(end_ts.tv_nsec - start_ts.tv_nsec);
-        printf("pass %u: %u keys, %u ok, %u missing, %u mismatch, %.2f us/op\n", pass, nkeys,
-          nfound, nmissing, nmismatch, (double)elapsed_ns / 1000.0 / nkeys);
+        printf("pass %u: %u lookups, %u ok, %u missing, %u mismatch, %.2f us/op\n", pass, nlookups,
+          nfound, nmissing, nmismatch, (double)elapsed_ns / 1000.0 / nlookups);
     }
 
     if ((ret = conn->close(conn, NULL)) != 0) {
