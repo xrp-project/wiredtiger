@@ -1,0 +1,40 @@
+# YCSB A (50/50 read/update, zipfian 0.99) against the 100GB XRP test DB,
+# mirroring My-YCSB rocksdb/config/ycsb_a.yaml where applicable. The database
+# section must match the existing tree built by create_db: 8-digit keys
+# (key_size includes the NUL, so 9), 1000-char values (value_size 1001),
+# 75M entries. The WT client is op-count-bounded, so runtime maps to
+# nr_warmup_op/nr_op instead of the rocksdb config's runtime_seconds.
+database:
+  key_size: 9
+  value_size: 1001
+  nr_entry: 75000000
+
+workload:
+  # Time-based bounds govern (op counts are caps, mirroring the rocksdb
+  # config's style). Validation runs use 30s/30s; bump for full runs.
+  nr_warmup_op: 100000000
+  warmup_runtime_seconds: 30
+  nr_op: 100000000
+  runtime_seconds: 30
+  nr_thread: 16
+  next_op_interval_ns: 0
+  operation_proportion:
+    read: 0.5
+    update: 0.5
+    insert: 0
+    scan: 0
+    read_modify_write: 0
+  request_distribution: "zipfian"
+  zipfian_constant: 0.99
+  trace_file_list:
+    - "./cur_trace"
+  scan_length: 100
+
+wiredtiger:
+  data_dir: "/fabric/wt_big_ycsb"
+  table_name: "file:xrp_test.wt"
+  conn_config: "direct_io=[data],buffer_alignment=512B,mmap=false,cache_size=128M,eviction_trigger=95,eviction_target=80,eviction=(threads_max=2,threads_min=2),statistics=(fast)"
+  session_config: "isolation=read-uncommitted"
+  cursor_config: ""
+  create_table_config: "unused"
+  print_stats: true
