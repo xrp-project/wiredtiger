@@ -1,0 +1,36 @@
+# uniform_read_write workload for the 100GB XRP test DB. Database section must match
+# the tree built by create_db. Driver overwrites data_dir/cache/threads.
+database:
+  key_size: 9
+  value_size: 1001
+  nr_entry: 75000000
+
+workload:
+  # Time-based bounds govern (op counts are caps, mirroring the rocksdb
+  # config's style). Validation runs use 30s/30s; bump for full runs.
+  nr_warmup_op: 100000000
+  warmup_runtime_seconds: 30
+  nr_op: 100000000
+  runtime_seconds: 30
+  nr_thread: 16
+  next_op_interval_ns: 0
+  operation_proportion:
+    read: 0.5
+    update: 0
+    insert: 0.5
+    scan: 0
+    read_modify_write: 0
+  request_distribution: "uniform"
+  zipfian_constant: 0.99
+  trace_file_list:
+    - "./cur_trace"
+  scan_length: 100
+
+wiredtiger:
+  data_dir: "/fabric/wt_big_ycsb"
+  table_name: "file:xrp_test.wt"
+  conn_config: "direct_io=[data],buffer_alignment=512B,mmap=false,cache_size=128M,eviction_trigger=95,eviction_target=80,eviction=(threads_max=2,threads_min=2),statistics=(fast)"
+  session_config: "isolation=read-uncommitted"
+  cursor_config: ""
+  create_table_config: "unused"
+  print_stats: true
