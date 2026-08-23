@@ -24,3 +24,6 @@ xrp_lookup: xrp_lookup.c
 
 clean:
 	rm -f create_db user_lookup xrp_lookup
+
+bpfof_lookup: bpfof_lookup.c kv.h
+	$(CC) $(CFLAGS) -I.. -I$(XRP_INC) -o $@ bpfof_lookup.c $(LDFLAGS) -lwiredtiger -lpthread -ldl -lbpf
